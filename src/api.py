@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 import os
 from dotenv import load_dotenv
-from orchestrator import BioChatOrchestrator
+from src.orchestrator import BioChatOrchestrator
 import logging
 from datetime import datetime
 
