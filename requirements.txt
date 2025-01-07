@@ -1,0 +1,12 @@
+fastapi>=0.109.2
+uvicorn[standard]>=0.27.1
+openai>=1.12.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pydantic>=2.6.1
+python-multipart>=0.0.9
+aiohttp>=3.9.3
+async-timeout>=4.0.3
+typing-extensions>=4.9.0
+python-json-logger>=2.0.7
+httpx>=0.26.0
