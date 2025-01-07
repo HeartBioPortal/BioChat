@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional
 import json
 from openai import OpenAI
-from schemas import BIOCHAT_TOOLS
-from tool_executor import ToolExecutor
+from src.schemas import BIOCHAT_TOOLS
+from src.tool_executor import ToolExecutor
 
 class BioChatOrchestrator:
     def __init__(self, openai_api_key: str, ncbi_api_key: str, tool_name: str, email: str):
