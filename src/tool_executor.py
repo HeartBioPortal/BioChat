@@ -1,7 +1,7 @@
 from typing import Dict, Any
 import json
-from APIHub import NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI
-from schemas import LiteratureSearchParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams
+from src.APIHub import NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI
+from src.schemas import LiteratureSearchParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams
 
 class ToolExecutor:
     def __init__(self, ncbi_api_key: str, tool_name: str, email: str):
