@@ -334,35 +334,35 @@ class UniProtAPI(BioDatabaseAPI):
         response = self._make_request(endpoint)
         return response.json()
 
-# Example usage:
-if __name__ == "__main__":
-    # Initialize clients
-    ncbi = NCBIEutils(
-        api_key="your_api_key",
-        tool="your_tool_name",
-        email="your_email@example.com"
-    )
+# # Example usage:
+# if __name__ == "__main__":
+#     # Initialize clients
+#     ncbi = NCBIEutils(
+#         api_key="your_api_key",
+#         tool="your_tool_name",
+#         email="your_email@example.com"
+#     )
     
-    # Example search combining gene and phenotype
-    results = ncbi.search_and_analyze(
-        genes=["BRCA1", "BRCA2"],
-        phenotypes=["Breast Neoplasms"],
-        additional_terms=["prognosis"],
-        max_results=50
-    )
+#     # Example search combining gene and phenotype
+#     results = ncbi.search_and_analyze(
+#         genes=["BRCA1", "BRCA2"],
+#         phenotypes=["Breast Neoplasms"],
+#         additional_terms=["prognosis"],
+#         max_results=50
+#     )
     
-    # Process results
-    for pmid, article in results['articles'].items():
-        print(f"Title: {article['title']}")
-        print(f"Abstract: {article['abstract'][:200]}...")
-        print("-" * 80)
+#     # Process results
+#     for pmid, article in results['articles'].items():
+#         print(f"Title: {article['title']}")
+#         print(f"Abstract: {article['abstract'][:200]}...")
+#         print("-" * 80)
     
-    # ensembl = EnsemblAPI()
-    # gwas = GWASCatalog()
-    # uniprot = UniProtAPI()
+#     ensembl = EnsemblAPI()
+#     gwas = GWASCatalog()
+#     uniprot = UniProtAPI()
     
-    # Example searches
-    # ensembl_results = ensembl.search("BRCA1")
-    # gwas_results = gwas.search("diabetes")
-    # uniprot_results = uniprot.search("insulin")
+#     # Example searches
+#     ensembl_results = ensembl.search("BRCA1")
+#     gwas_results = gwas.search("diabetes")
+#     uniprot_results = uniprot.search("insulin")
 
