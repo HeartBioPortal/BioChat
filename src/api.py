@@ -7,9 +7,23 @@ from dotenv import load_dotenv
 from src.orchestrator import BioChatOrchestrator
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+import os
 
 # Load environment variables
 load_dotenv()
+
+# Access environment variables
+openai_api_key = os.getenv("OPENAI_API_KEY")
+ncbi_api_key = os.getenv("NCBI_API_KEY")
+contact_email = os.getenv("CONTACT_EMAIL")
+
+# Validate required environment variables
+required_env_vars = ["OPENAI_API_KEY", "NCBI_API_KEY", "CONTACT_EMAIL"]
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
 
 # Configure logging
 logging.basicConfig(
@@ -54,33 +68,42 @@ def get_orchestrator() -> BioChatOrchestrator:
     """Dependency to get or create the BioChatOrchestrator instance"""
     global orchestrator
     if orchestrator is None:
-        required_env_vars = {
-            "OPENAI_API_KEY": "OpenAI API key",
-            "NCBI_API_KEY": "NCBI API key",
-            "CONTACT_EMAIL": "Contact email"
-        }
-        
-        missing_vars = {
-            var: desc for var, desc in required_env_vars.items() 
-            if not os.getenv(var)
-        }
-        
-        if missing_vars:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Missing required environment variables: {', '.join(missing_vars.keys())}"
+        try:
+            # Load and validate environment variables
+            openai_api_key = os.environ.get("OPENAI_API_KEY")
+            ncbi_api_key = os.environ.get("NCBI_API_KEY")
+            contact_email = os.environ.get("CONTACT_EMAIL")
+
+            # Check for missing environment variables
+            missing_vars = []
+            if not openai_api_key:
+                missing_vars.append("OPENAI_API_KEY")
+            if not ncbi_api_key:
+                missing_vars.append("NCBI_API_KEY")
+            if not contact_email:
+                missing_vars.append("CONTACT_EMAIL")
+
+            if missing_vars:
+                raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+            # Initialize orchestrator with validated environment variables
+            orchestrator = BioChatOrchestrator(
+                openai_api_key=openai_api_key,
+                ncbi_api_key=ncbi_api_key,
+                tool_name="BioChat",
+                email=contact_email
             )
             
-        try:
-            orchestrator = BioChatOrchestrator(
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
-                ncbi_api_key=os.getenv("NCBI_API_KEY"),
-                tool_name="BioChat",
-                email=os.getenv("CONTACT_EMAIL")
-            )
+        except ValueError as ve:
+            raise HTTPException(status_code=500, detail=str(ve))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize BioChat service: {str(e)}"
+            )
+    
     return orchestrator
+
 
 @app.post("/query")
 async def process_query(
