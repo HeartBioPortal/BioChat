@@ -117,7 +117,11 @@ async def process_query(
             
         response = await orchestrator.process_query(query.text)
         return {"response": response, "timestamp": datetime.now().isoformat()}
+    except ValueError as ve:
+        logger.error(f"Validation error: {str(ve)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(ve))
     except Exception as e:
+        logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/history")
@@ -129,6 +133,7 @@ async def get_history(
         history = orchestrator.get_conversation_history()
         return ConversationHistory(messages=[Message(**msg) for msg in history])
     except Exception as e:
+        logger.error(f"Error getting history: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/clear")
@@ -140,8 +145,9 @@ async def clear_history(
         orchestrator.clear_conversation_history()
         return {"status": "success", "timestamp": datetime.now().isoformat()}
     except Exception as e:
+        logger.error(f"Error clearing history: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/health")
 async def health_check() -> Dict:
     """Check API health status"""
