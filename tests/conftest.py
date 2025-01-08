@@ -100,7 +100,7 @@ def mock_openai_client():
                             "type": "function",
                             "function": {
                                 "name": "search_literature",
-                                "arguments": '{"genes": ["BRCA1"], "phenotypes": ["Breast Cancer"]}'
+                                "arguments": '{"genes": ["DSP"], "phenotypes": ["myocardial infarction"]}'
                             }
                         }]
                     ),
