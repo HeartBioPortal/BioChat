@@ -111,10 +111,10 @@ def mock_openai_client():
 def mock_orchestrator(mock_openai_client, mock_apis):
     """Provides a mock BioChatOrchestrator with mocked dependencies"""
     orchestrator = BioChatOrchestrator(
-        openai_api_key="mock_key",
-        ncbi_api_key="mock_key",
+        openai_api_key="",
+        ncbi_api_key="02a2984e0e1903a40356d66e946571c0b608",
         tool_name="test_tool",
-        email="test@example.com"
+        email="kasraavand@gmail.com"
     )
     orchestrator.client = mock_openai_client
     return orchestrator
