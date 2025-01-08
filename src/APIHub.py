@@ -347,7 +347,7 @@ class UniProtAPI(BioDatabaseAPI):
     
 #     # Example search combining gene and phenotype
 #     results = ncbi.search_and_analyze(
-#         genes=["BRCA1", "BRCA2"],
+#         genes=["DSP", "BRCA2"],
 #         phenotypes=["Breast Neoplasms"],
 #         additional_terms=["prognosis"],
 #         max_results=50
@@ -364,7 +364,7 @@ class UniProtAPI(BioDatabaseAPI):
 #     uniprot = UniProtAPI()
     
 #     # Example searches
-#     ensembl_results = ensembl.search("BRCA1")
+#     ensembl_results = ensembl.search("DSP")
 #     gwas_results = gwas.search("diabetes")
 #     uniprot_results = uniprot.search("insulin")
 
