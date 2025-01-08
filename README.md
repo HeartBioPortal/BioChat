@@ -13,6 +13,11 @@ BioChat provides seamless access to multiple biological databases through a unif
 - Natural language understanding of biological queries
 - Comprehensive result synthesis and explanation
 
+
+## Process FlowChart
+
+![image (4)](https://github.com/user-attachments/assets/0e8681a7-df04-44e0-8ede-fd6354eb080d)
+
 ## Project Structure
 
 ```
