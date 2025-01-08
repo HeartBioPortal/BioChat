@@ -6,10 +6,20 @@ from src.tool_executor import ToolExecutor
 
 class BioChatOrchestrator:
     def __init__(self, openai_api_key: str, ncbi_api_key: str, tool_name: str, email: str):
-        """Initialize BioChat with necessary components"""
-        self.client = OpenAI(api_key=openai_api_key)
-        self.tool_executor = ToolExecutor(ncbi_api_key, tool_name, email)
-        self.conversation_history = []
+        """Initialize the BioChat orchestrator with required credentials"""
+        if not openai_api_key or not ncbi_api_key or not email:
+            raise ValueError("All required credentials must be provided")
+            
+        try:
+            self.client = OpenAI(api_key=openai_api_key)
+            self.tool_executor = ToolExecutor(
+                ncbi_api_key=ncbi_api_key,
+                tool_name=tool_name,
+                email=email
+            )
+            self.conversation_history = []
+        except Exception as e:
+            raise ValueError(f"Failed to initialize services: {str(e)}")
 
     def _create_system_message(self) -> str:
         """Create the system message that guides the model's behavior"""
