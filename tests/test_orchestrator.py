@@ -20,16 +20,43 @@ async def test_process_simple_query(mock_orchestrator):
 @pytest.mark.asyncio
 async def test_process_query_with_tool_call(mock_orchestrator):
     """Test processing a query that requires tool calls"""
+    # Set up mock responses
+    mock_orchestrator.client.chat.completions.create = AsyncMock(side_effect=[
+        Mock(
+            choices=[Mock(
+                message=Mock(
+                    tool_calls=[Mock(
+                        id="call_1",
+                        function=Mock(
+                            name="search_literature",
+                            arguments='{"genes": ["BRCA1"], "phenotypes": ["Breast Cancer"], "max_results": 5}'
+                        )
+                    )],
+                    content=None
+                ),
+                finish_reason="tool_calls"
+            )]
+        ),
+        Mock(
+            choices=[Mock(
+                message=Mock(
+                    content="Final response after tool call",
+                ),
+                finish_reason="stop"
+            )]
+        )
+    ])
+    
     # Set up mock executor
     mock_orchestrator.tool_executor = Mock()
-    mock_orchestrator.tool_executor.execute_tool = AsyncMock()
+    mock_orchestrator.tool_executor.execute_tool = AsyncMock(return_value={"result": "mock data"})
     
     query = "Find research papers about BRCA1 and breast cancer"
     response = await mock_orchestrator.process_query(query)
     
     assert isinstance(response, str)
+    assert response == "Final response after tool call"
     assert len(mock_orchestrator.conversation_history) >= 3
-    assert mock_orchestrator.client.chat.completions.create.call_count >= 2
     assert mock_orchestrator.tool_executor.execute_tool.called
 
 @pytest.mark.asyncio
@@ -73,12 +100,8 @@ async def test_system_message_content(mock_orchestrator):
 @pytest.mark.asyncio
 async def test_multiple_tool_calls(mock_orchestrator):
     """Test handling multiple tool calls in sequence"""
-    # Set up mock executor
-    mock_orchestrator.tool_executor = Mock()
-    mock_orchestrator.tool_executor.execute_tool = AsyncMock()
-    
     # Set up mock responses
-    mock_orchestrator.client.chat.completions.create.side_effect = [
+    mock_orchestrator.client.chat.completions.create = AsyncMock(side_effect=[
         Mock(
             choices=[Mock(
                 message=Mock(
@@ -87,14 +110,14 @@ async def test_multiple_tool_calls(mock_orchestrator):
                             id="call_1",
                             function=Mock(
                                 name="search_literature",
-                                arguments='{"genes": ["BRCA1"], "phenotypes": ["Cancer"]}'
+                                arguments='{"genes": ["BRCA1"], "phenotypes": ["Cancer"], "max_results": 5}'
                             )
                         ),
                         Mock(
                             id="call_2",
                             function=Mock(
                                 name="get_protein_info",
-                                arguments='{"protein_id": "BRCA1"}'
+                                arguments='{"protein_id": "BRCA1", "include_features": true}'
                             )
                         )
                     ],
@@ -105,15 +128,22 @@ async def test_multiple_tool_calls(mock_orchestrator):
         ),
         Mock(
             choices=[Mock(
-                message=Mock(content="Final response"),
+                message=Mock(
+                    content="Final response after multiple tools",
+                ),
                 finish_reason="stop"
             )]
         )
-    ]
+    ])
+    
+    # Set up mock executor
+    mock_orchestrator.tool_executor = Mock()
+    mock_orchestrator.tool_executor.execute_tool = AsyncMock(return_value={"result": "mock data"})
     
     query = "Tell me about BRCA1 research and protein structure"
     response = await mock_orchestrator.process_query(query)
     
-    assert mock_orchestrator.tool_executor.execute_tool.call_count == 2
     assert isinstance(response, str)
-    assert len(mock_orchestrator.conversation_history) >= 4
+    assert response == "Final response after multiple tools"
+    assert mock_orchestrator.tool_executor.execute_tool.call_count == 2
+    assert len(mock_orchestrator.conversation_history) >= 4  # User, tool calls, tool responses, final response
