@@ -30,7 +30,7 @@ BIOCHAT_TOOLS = [
         "function": {
             "name": "search_literature",
             "description": "Search scientific literature using NCBI PubMed for biological and medical research. Use this when the user asks about research papers, studies, or scientific findings.",
-            "parameters": LiteratureSearchParams.schema(),
+            "parameters": LiteratureSearchParams.model_json_schema(),
             "strict": True
         }
     },
@@ -39,7 +39,7 @@ BIOCHAT_TOOLS = [
         "function": {
             "name": "search_variants",
             "description": "Search for genetic variants in a genomic region using Ensembl. Use this when the user asks about genetic variations or mutations in specific genomic regions.",
-            "parameters": VariantSearchParams.schema(),
+            "parameters": VariantSearchParams.model_json_schema(),
             "strict": True
         }
     },
@@ -48,7 +48,7 @@ BIOCHAT_TOOLS = [
         "function": {
             "name": "search_gwas",
             "description": "Search GWAS Catalog for genetic associations with traits and diseases. Use this when the user asks about genetic associations with diseases or traits.",
-            "parameters": GWASSearchParams.schema(),
+            "parameters": GWASSearchParams.model_json_schema(),
             "strict": True
         }
     },
@@ -57,7 +57,7 @@ BIOCHAT_TOOLS = [
         "function": {
             "name": "get_protein_info",
             "description": "Get detailed protein information from UniProt. Use this when the user asks about protein structure, function, or annotations.",
-            "parameters": ProteinInfoParams.schema(),
+            "parameters": ProteinInfoParams.model_json_schema(),
             "strict": True
         }
     }
