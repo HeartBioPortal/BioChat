@@ -11,12 +11,21 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 import time
 
-
 class BioDatabaseAPI(ABC):
     """Abstract base class for biological database APIs."""
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, tool: Optional[str] = None, email: Optional[str] = None):
+        """
+        Initialize the base API client.
+        
+        Args:
+            api_key: Optional API key for authentication
+            tool: Optional tool name for identification
+            email: Optional email for contact purposes
+        """
         self.api_key = api_key
+        self.tool = tool
+        self.email = email
         self.base_url = ""
         self.headers = {"Content-Type": "application/json"}
         if api_key:
@@ -42,16 +51,22 @@ class BioDatabaseAPI(ABC):
         return response
 
 class NCBIEutils(BioDatabaseAPI):
-    """
-    Enhanced NCBI E-utilities API client with advanced PubMed search capabilities.
-    Implements best practices for E-utilities usage including rate limiting.
-    """
+    """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
     
-    def __init__(self, api_key: Optional[str] = None, tool: str = "python_bio_api", email: str = None):
-        super().__init__(api_key)
+    def __init__(self, api_key: Optional[str] = None, tool: str = "python_bio_api", email: Optional[str] = None):
+        super().__init__(api_key=api_key, tool=tool, email=email)
         self.base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-        self.tool = tool
-        self.email = email
+    
+    def search(self, query: str) -> Dict:
+        """Implement the abstract search method for NCBI"""
+        params = self._build_base_params()
+        params.update({
+            "db": "pubmed",
+            "term": query,
+            "retmode": "json"
+        })
+        response = self._make_request("esearch.fcgi", params)
+        return response.json()
         
     def _build_base_params(self) -> Dict:
         """Build base parameters required for E-utilities."""
@@ -251,12 +266,7 @@ class EnsemblAPI(BioDatabaseAPI):
         self.headers["Content-Type"] = "application/json"
     
     def search(self, query: str, species: str = "homo_sapiens") -> Dict:
-        """
-        Search Ensembl database.
-        Args:
-            query: Search terms
-            species: Species name (default: homo_sapiens)
-        """
+        """Implement the abstract search method for Ensembl"""
         endpoint = f"lookup/symbol/{species}/{query}"
         response = self._make_request(endpoint)
         return response.json()
@@ -283,11 +293,7 @@ class GWASCatalog(BioDatabaseAPI):
         self.base_url = "https://www.ebi.ac.uk/gwas/rest/api"
     
     def search(self, query: str) -> Dict:
-        """
-        Search GWAS Catalog studies.
-        Args:
-            query: Search terms
-        """
+        """Implement the abstract search method for GWAS Catalog"""
         endpoint = "studies/search"
         params = {"q": query}
         response = self._make_request(endpoint, params)
@@ -311,11 +317,7 @@ class UniProtAPI(BioDatabaseAPI):
         self.base_url = "https://rest.uniprot.org"
     
     def search(self, query: str) -> Dict:
-        """
-        Search UniProt database.
-        Args:
-            query: Search terms
-        """
+        """Implement the abstract search method for UniProt"""
         endpoint = "uniprotkb/search"
         params = {
             "query": query,
