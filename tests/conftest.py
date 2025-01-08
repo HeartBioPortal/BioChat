@@ -6,6 +6,14 @@ from src.tool_executor import ToolExecutor
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from src.APIHub import BioDatabaseAPI
 
+# Mock credentials for testing
+TEST_CREDENTIALS = {
+    "openai_api_key": "test_openai_key_12345",
+    "ncbi_api_key": "test_ncbi_key_12345",
+    "tool_name": "test_tool",
+    "email": "test@example.com"
+}
+
 # Create a mock implementation of BioDatabaseAPI
 class MockNCBIEutils(BioDatabaseAPI):
     """Mock implementation of NCBIEutils for testing"""
@@ -24,7 +32,7 @@ class MockNCBIEutils(BioDatabaseAPI):
             }
         }
 
-    def search_and_analyze(self, genes, phenotypes, additional_terms=None, max_results=10):
+    def search_and_analyze(self, genes=None, phenotypes=None, additional_terms=None, max_results=10):
         """Mock implementation of search_and_analyze"""
         return {
             "articles": [
@@ -111,10 +119,22 @@ def mock_openai_client():
 def mock_orchestrator(mock_openai_client, mock_apis):
     """Provides a mock BioChatOrchestrator with mocked dependencies"""
     orchestrator = BioChatOrchestrator(
-        openai_api_key="",
-        ncbi_api_key="02a2984e0e1903a40356d66e946571c0b608",
-        tool_name="test_tool",
-        email="kasraavand@gmail.com"
+        openai_api_key=TEST_CREDENTIALS["openai_api_key"],
+        ncbi_api_key=TEST_CREDENTIALS["ncbi_api_key"],
+        tool_name=TEST_CREDENTIALS["tool_name"],
+        email=TEST_CREDENTIALS["email"]
     )
     orchestrator.client = mock_openai_client
     return orchestrator
+
+@pytest.fixture
+def mock_env_vars():
+    """Provides mock environment variables for testing"""
+    with patch.dict('os.environ', {
+        'OPENAI_API_KEY': TEST_CREDENTIALS["openai_api_key"],
+        'NCBI_API_KEY': TEST_CREDENTIALS["ncbi_api_key"],
+        'CONTACT_EMAIL': TEST_CREDENTIALS["email"],
+        'PORT': '8000',
+        'HOST': '0.0.0.0'
+    }):
+        yield
