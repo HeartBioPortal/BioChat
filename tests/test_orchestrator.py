@@ -29,7 +29,7 @@ async def test_process_query_with_tool_call(mock_orchestrator):
                         id="call_1",
                         function=Mock(
                             name="search_literature",
-                            arguments='{"genes": ["BRCA1"], "phenotypes": ["Breast Cancer"], "max_results": 5}'
+                            arguments='{"genes": ["DSP"], "phenotypes": ["myocardial infarction"], "max_results": 5}'
                         )
                     )],
                     content=None
@@ -51,7 +51,7 @@ async def test_process_query_with_tool_call(mock_orchestrator):
     mock_orchestrator.tool_executor = Mock()
     mock_orchestrator.tool_executor.execute_tool = AsyncMock(return_value={"result": "mock data"})
     
-    query = "Find research papers about BRCA1 and breast cancer"
+    query = "Find research papers about DSP and myocardial infarction"
     response = await mock_orchestrator.process_query(query)
     
     assert isinstance(response, str)
@@ -110,14 +110,14 @@ async def test_multiple_tool_calls(mock_orchestrator):
                             id="call_1",
                             function=Mock(
                                 name="search_literature",
-                                arguments='{"genes": ["BRCA1"], "phenotypes": ["Cancer"], "max_results": 5}'
+                                arguments='{"genes": ["DSP"], "phenotypes": ["Cancer"], "max_results": 5}'
                             )
                         ),
                         Mock(
                             id="call_2",
                             function=Mock(
                                 name="get_protein_info",
-                                arguments='{"protein_id": "BRCA1", "include_features": true}'
+                                arguments='{"protein_id": "DSP", "include_features": true}'
                             )
                         )
                     ],
@@ -140,7 +140,7 @@ async def test_multiple_tool_calls(mock_orchestrator):
     mock_orchestrator.tool_executor = Mock()
     mock_orchestrator.tool_executor.execute_tool = AsyncMock(return_value={"result": "mock data"})
     
-    query = "Tell me about BRCA1 research and protein structure"
+    query = "Tell me about DSP research and protein structure"
     response = await mock_orchestrator.process_query(query)
     
     assert isinstance(response, str)

@@ -24,8 +24,8 @@ async def test_execute_literature_search(tool_executor):
     mock_tool_call = Mock()
     mock_tool_call.function.name = "search_literature"
     mock_tool_call.function.arguments = '''{
-        "genes": ["BRCA1"],
-        "phenotypes": ["Breast Cancer"],
+        "genes": ["DSP"],
+        "phenotypes": ["myocardial infarction"],
         "max_results": 5
     }'''
     
