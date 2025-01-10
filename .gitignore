@@ -1,2 +1,7 @@
 **.pyc
 .env
+.env*
+*.log
+.coverage
+tests/logs/
+300
