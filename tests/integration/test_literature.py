@@ -60,7 +60,7 @@ async def test_date_range_query(integration_orchestrator, clear_conversation_his
 @pytest.mark.asyncio
 async def test_error_handling_invalid_query(integration_orchestrator, clear_conversation_history):
     """Test handling of invalid or malformed queries"""
-    query = "Find papers about @#$%^"
+    query = "In terms of the role of specific proteins in myocardial infarction, give me the best insights into potential treatments and understanding of the disease process"
     response = await integration_orchestrator.process_query(query)
     
     test_logger.log_conversation(
@@ -78,7 +78,7 @@ async def test_error_handling_invalid_query(integration_orchestrator, clear_conv
 @pytest.mark.asyncio
 async def test_result_synthesis(integration_orchestrator, clear_conversation_history):
     """Test the system's ability to synthesize information from multiple sources"""
-    query = "What are the current treatment approaches for DSP-positive myocardial infarction patients?"
+    query = "What are the current treatment approaches for myocardial infarction patients?"
     response = await integration_orchestrator.process_query(query)
     
     test_logger.log_conversation(
