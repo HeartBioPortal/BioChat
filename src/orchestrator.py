@@ -24,6 +24,73 @@ class BioChatOrchestrator:
         except Exception as e:
             raise ValueError(f"Failed to initialize services: {str(e)}")
 
+    async def process_query(self, user_query: str) -> str:
+        """Process a user query through the ChatGPT model and execute necessary database queries"""
+        try:
+            # Add user query to conversation history
+            self.conversation_history.append({"role": "user", "content": user_query})
+            
+            # Initial message list includes system and user messages
+            messages = [
+                {"role": "system", "content": self._create_system_message()},
+                {"role": "user", "content": user_query}
+            ]
+
+            # Get initial response from ChatGPT
+            initial_completion = await self.client.chat.completions.create(
+                model="gpt-4-0125-preview",
+                messages=messages,
+                tools=BIOCHAT_TOOLS,
+                tool_choice="auto"
+            )
+
+            initial_message = initial_completion.choices[0].message
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": initial_message.content or "",
+                "tool_calls": initial_message.tool_calls or []
+            })
+
+            # Process tool calls if present
+            if initial_message.tool_calls:
+                tool_messages = []
+                
+                # Execute each tool call
+                for tool_call in initial_message.tool_calls:
+                    try:
+                        function_response = await self.tool_executor.execute_tool(tool_call)
+                        tool_messages.append({
+                            "role": "tool",
+                            "content": json.dumps(function_response),
+                            "tool_call_id": tool_call.id
+                        })
+                    except Exception as e:
+                        logger.error(f"Tool execution error: {str(e)}")
+                
+                if tool_messages:
+                    # Add tool messages to both conversation history and messages for next completion
+                    self.conversation_history.extend(tool_messages)
+                    messages.extend([self.conversation_history[-2]])  # Add assistant message with tool calls
+                    messages.extend(tool_messages)
+
+                    # Get final response
+                    final_completion = await self.client.chat.completions.create(
+                        model="gpt-4-0125-preview",
+                        messages=messages
+                    )
+
+                    final_message = final_completion.choices[0].message.content
+                    self.conversation_history.append({"role": "assistant", "content": final_message})
+                    return final_message
+
+            # Return initial response if no tool calls were made
+            return initial_message.content or "I apologize, but I couldn't generate a response. Please try rephrasing your question."
+
+        except Exception as e:
+            error_message = f"An error occurred: {str(e)}"
+            self.conversation_history.append({"role": "assistant", "content": error_message})
+            return error_message
+
     def _create_system_message(self) -> str:
         """Create the system message that guides the model's behavior"""
         return """You are BioChat, an AI assistant specialized in biological and medical research. Your role is to:
@@ -31,79 +98,8 @@ class BioChatOrchestrator:
 2. Use the appropriate database APIs to fetch relevant information
 3. Synthesize and explain the information in a clear, scientific manner
 
-Guidelines for using tools:
-- Use search_literature when users ask about research papers, studies, or scientific findings
-- Use search_variants for questions about genetic variations or mutations
-- Use search_gwas when users ask about genetic associations with diseases
-- Use get_protein_info for queries about protein structure and function
-
-Always provide accurate scientific information and cite sources when possible."""
-
-    async def process_query(self, user_query: str) -> str:
-        """Process a user query through the ChatGPT model and execute necessary database queries"""
-        try:
-            # Format the query for tool calls
-            if "treatment" in user_query.lower() or "therapy" in user_query.lower():
-                search_params = {
-                    "genes": [],
-                    "phenotypes": [p for p in ["myocardial infarction", "heart attack"] if p in user_query.lower()],
-                    "additional_terms": ["treatment", "therapy", "management"],
-                    "max_results": 5
-                }
-            else:
-                search_params = None
-                
-            # Get initial response from ChatGPT
-            completion = await self.client.chat.completions.create(
-                model="gpt-4-0125-preview",
-                messages=[
-                    {"role": "system", "content": self._create_system_message()},
-                    {"role": "user", "content": user_query}
-                ],
-                tools=BIOCHAT_TOOLS if search_params else None,
-                tool_choice="auto" if search_params else None
-            )
-
-            # Process response and tool calls
-            response_message = completion.choices[0].message
-            
-            if response_message.tool_calls:
-                # Execute tool calls with properly formatted parameters
-                function_responses = []
-                for tool_call in response_message.tool_calls:
-                    try:
-                        function_response = await self.tool_executor.execute_tool(tool_call)
-                        function_responses.append({
-                            "role": "tool",
-                            "content": json.dumps(function_response),
-                            "tool_call_id": tool_call.id
-                        })
-                    except Exception as e:
-                        logger.error(f"Tool execution error: {str(e)}")
-                        continue
-
-                if function_responses:
-                    self.conversation_history.extend(function_responses)
-                    final_completion = await self.client.chat.completions.create(
-                        model="gpt-4-0125-preview",
-                        messages=[
-                            {"role": "system", "content": self._create_system_message()},
-                            *self.conversation_history
-                        ]
-                    )
-                    final_message = final_completion.choices[0].message.content
-                    self.conversation_history.append({"role": "assistant", "content": final_message})
-                    return final_message
-
-            # Return direct response if no tool calls or if all tool calls failed
-            direct_response = response_message.content
-            self.conversation_history.append({"role": "assistant", "content": direct_response})
-            return direct_response
-
-        except Exception as e:
-            error_message = f"An error occurred: {str(e)}"
-            self.conversation_history.append({"role": "assistant", "content": error_message})
-            return error_message
+Always aim to provide accurate, up-to-date scientific information with appropriate citations.
+When using tools, analyze the results carefully and provide comprehensive, well-structured responses."""
 
     def get_conversation_history(self) -> List[Dict]:
         """Return the conversation history"""
