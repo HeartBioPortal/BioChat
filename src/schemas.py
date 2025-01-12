@@ -2,11 +2,21 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
 class LiteratureSearchParams(BaseModel):
-    genes: List[str] = Field(description="List of gene names or symbols to search for")
+    genes: List[str] = Field(default_factory=list, description="List of gene names or symbols to search for")
     phenotypes: List[str] = Field(description="List of phenotypes or diseases to search for")
     additional_terms: List[str] = Field(default_factory=list, description="Additional search terms to refine the query")
     date_range: Optional[Dict[str, str]] = Field(default=None, description="Date range in YYYY/MM/DD format")
     max_results: int = Field(default=10, description="Maximum number of results to return")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "genes": ["BRCA1", "BRCA2"],
+                "phenotypes": ["breast cancer"],
+                "additional_terms": ["treatment", "therapy"],
+                "max_results": 5
+            }
+        }
 
 class VariantSearchParams(BaseModel):
     chromosome: str = Field(description="Chromosome name (e.g., '1', 'X', 'Y')")
