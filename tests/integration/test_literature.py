@@ -1,6 +1,32 @@
 import pytest
 from tests.utils.logger import test_logger
 
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_complex_query(integration_orchestrator, clear_conversation_history):
+    """Test querying multiple genes and their interactions"""
+
+    query = """ What is the mechanistic relationship between PCSK9 and atherosclerotic plaque development in 
+    coronary artery disease, specifically addressing: (1) the protein's role in LDL receptor recycling and 
+    its impact on plasma LDL-cholesterol levels, (2) its influence on vascular inflammation through NF-κB signaling pathways,
+    (3) the clinical implications of gain-of-function versus loss-of-function PCSK9 genetic variants on cardiovascular outcomes,
+    and (4) how these molecular mechanisms inform current therapeutic approaches using PCSK9 inhibitors. Include discussion of 
+    recent findings regarding potential LDL-receptor-independent effects of PCSK9 on atherosclerosis progression and any 
+    emerging evidence for sex-specific differences in PCSK9-mediated cardiovascular risk."""
+    response = await integration_orchestrator.process_query(query)
+    
+    test_logger.log_conversation(
+        test_name="Complex and technical Query",
+        query=query,
+        response=response,
+        conversation_history=integration_orchestrator.get_conversation_history()
+    )
+    
+    assert isinstance(response, str)
+    assert len(response) > 200
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_DSP_literature_search(integration_orchestrator, clear_conversation_history):
@@ -20,10 +46,12 @@ async def test_DSP_literature_search(integration_orchestrator, clear_conversatio
     assert len(response) > 0
     assert "DSP" in response
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complex_query_with_multiple_genes(integration_orchestrator, clear_conversation_history):
     """Test querying multiple genes and their interactions"""
+        
     query = "What is known about the interaction between DSP, BRCA2, and TP53 in cancer development?"
     response = await integration_orchestrator.process_query(query)
     
@@ -76,13 +104,7 @@ async def test_date_range_query(integration_orchestrator, clear_conversation_his
 async def test_error_handling_invalid_query(integration_orchestrator, clear_conversation_history):
     """Test handling of invalid or malformed queries"""
     # Use a more clearly invalid query
-    query = """What is the mechanistic relationship between PCSK9 and atherosclerotic plaque development in 
-    coronary artery disease, specifically addressing: (1) the protein's role in LDL receptor recycling and 
-    its impact on plasma LDL-cholesterol levels, (2) its influence on vascular inflammation through NF-κB signaling pathways,
-    (3) the clinical implications of gain-of-function versus loss-of-function PCSK9 genetic variants on cardiovascular outcomes,
-    and (4) how these molecular mechanisms inform current therapeutic approaches using PCSK9 inhibitors. Include discussion of 
-    recent findings regarding potential LDL-receptor-independent effects of PCSK9 on atherosclerosis progression and any 
-    emerging evidence for sex-specific differences in PCSK9-mediated cardiovascular risk."""
+    query = """What is the mechanistic relationship between !@!@#±"""
     response = await integration_orchestrator.process_query(query)
     
     test_logger.log_conversation(
