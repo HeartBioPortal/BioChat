@@ -18,7 +18,8 @@ class BioChatOrchestrator:
             self.tool_executor = ToolExecutor(
                 ncbi_api_key=ncbi_api_key,
                 tool_name=tool_name,
-                email=email
+                email=email,
+                api_keys={}
             )
             self.conversation_history = []
         except Exception as e:
@@ -38,7 +39,7 @@ class BioChatOrchestrator:
 
             # Get initial response from ChatGPT
             initial_completion = await self.client.chat.completions.create(
-                model="gpt-4-0125-preview",
+                model="gpt-4o",
                 messages=messages,
                 tools=BIOCHAT_TOOLS,
                 tool_choice="auto"
@@ -75,7 +76,7 @@ class BioChatOrchestrator:
 
                     # Get final response
                     final_completion = await self.client.chat.completions.create(
-                        model="gpt-4-0125-preview",
+                        model="gpt-4o",
                         messages=messages
                     )
 
