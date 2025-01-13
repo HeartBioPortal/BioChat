@@ -10,6 +10,7 @@ import json
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import time
+import aiohttp
 
 class BioDatabaseAPI(ABC):
     """Abstract base class for biological database APIs."""
@@ -49,6 +50,165 @@ class BioDatabaseAPI(ABC):
         response = requests.get(url, headers=self.headers, params=params)
         response.raise_for_status()
         return response
+
+class StringDBClient(BioDatabaseAPI):
+    """Client for STRING protein-protein interaction database"""
+    def __init__(self):
+        super().__init__()
+        self.base_url = "https://string-db.org/api"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {
+            "identifiers": query,
+            "species": 9606,  # Human
+            "format": "json"
+        }
+        return await self._make_request("json/interaction_partners", params)
+
+    async def get_protein_interactions(self, protein: str) -> Dict:
+        """Get detailed protein-protein interactions"""
+        params = {
+            "identifiers": protein,
+            "species": 9606,
+            "required_score": 400,
+            "network_flavor": "confidence"
+        }
+        return await self._make_request("network", params)
+
+class ReactomeClient(BioDatabaseAPI):
+    """Client for Reactome pathway database"""
+    def __init__(self):
+        super().__init__()
+        self.base_url = "https://reactome.org/ContentService/data"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {
+            "query": query,
+            "species": "Homo sapiens",
+            "types": "Pathway"
+        }
+        return await self._make_request("query/enhanced", params)
+
+    async def get_pathways(self, gene: str) -> Dict:
+        """Get pathways involving a gene"""
+        return await self._make_request(f"pathways/entity/{gene}/containedEvents")
+
+class IntActClient(BioDatabaseAPI):
+    """Client for IntAct molecular interaction database"""
+    def __init__(self):
+        super().__init__()
+        self.base_url = "https://www.ebi.ac.uk/intact/rest/interaction"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {
+            "query": query,
+            "format": "json"
+        }
+        return await self._make_request("findInteractions", params)
+
+    async def get_molecular_interactions(self, protein: str) -> Dict:
+        """Get detailed molecular interactions"""
+        params = {
+            "query": f"id:{protein}",
+            "format": "json",
+            "negative": "false"
+        }
+        return await self._make_request("findInteractions", params)
+
+class PharmGKBClient(BioDatabaseAPI):
+    """Client for PharmGKB pharmacogenomics database"""
+    def __init__(self, api_key: str):
+        super().__init__(api_key)
+        self.base_url = "https://api.pharmgkb.org/v1/data"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        return await self._make_request(f"search?q={query}")
+
+    async def get_drug_gene_relationships(self, gene: str) -> Dict:
+        """Get drug-gene relationships"""
+        return await self._make_request(f"relationships/gene/{gene}")
+
+class DisGeNETClient(BioDatabaseAPI):
+    """Client for DisGeNET disease-gene associations database"""
+    def __init__(self, api_key: str):
+        super().__init__(api_key)
+        self.base_url = "https://www.disgenet.org/api"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {"q": query}
+        return await self._make_request("search", params)
+
+    async def get_gene_disease_associations(self, gene: str) -> Dict:
+        """Get disease associations for a gene"""
+        params = {"gene": gene}
+        return await self._make_request("gda/gene", params)
+
+class BioCyc(BioDatabaseAPI):
+    """Client for BioCyc pathway/genome database"""
+    def __init__(self, api_key: str):
+        super().__init__(api_key)
+        self.base_url = "https://websvc.biocyc.org"
+        
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {
+            "query": query,
+            "organism": "HUMAN",
+            "detail": "full"
+        }
+        return await self._make_request("getSearch", params)
+
+    async def get_metabolic_pathways(self, gene: str) -> Dict:
+        """Get metabolic pathways for a gene"""
+        params = {
+            "gene": gene,
+            "organism": "HUMAN"
+        }
+        return await self._make_request("getMetabolicPathways", params)
+
+    async def get_pathway_details(self, pathway_id: str) -> Dict:
+        """Get detailed information about a specific pathway"""
+        params = {
+            "pathway": pathway_id,
+            "detail": "full"
+        }
+        return await self._make_request("getPathwayData", params)
+
+    async def get_gene_regulation(self, gene: str) -> Dict:
+        """Get regulation information for a gene"""
+        params = {
+            "gene": gene,
+            "organism": "HUMAN"
+        }
+        return await self._make_request("getRegulation", params)
+    
+class BioGridClient(BioDatabaseAPI):
+    """Client for BioGRID interaction database"""
+    def __init__(self, api_key: str):
+        super().__init__(api_key)
+        self.base_url = "https://webservice.thebiogrid.org"
+
+    async def search(self, query: str) -> Dict:
+        """Implement required search method"""
+        params = {
+            "searchNames": query,
+            "format": "json"
+        }
+        return await self._make_request("interactions", params)
+
+    async def get_protein_interactions(self, gene: str) -> Dict:
+        """Get detailed protein interactions"""
+        params = {
+            "searchNames": gene,
+            "format": "json",
+            "includeInteractors": True
+        }
+        return await self._make_request("interactions", params)
 
 class NCBIEutils(BioDatabaseAPI):
     """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
