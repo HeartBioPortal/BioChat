@@ -33,6 +33,36 @@ class ProteinInfoParams(BaseModel):
     protein_id: str = Field(description="UniProt identifier or gene name")
     include_features: bool = Field(default=True, description="Include protein features in the response")
 
+
+class ProteinInteractionParams(BaseModel):
+    """Parameters for protein interaction queries"""
+    protein_id: str = Field(description="Protein identifier")
+    include_indirect: bool = Field(default=True, description="Include indirect interactions")
+    confidence_score: float = Field(default=0.7, description="Minimum confidence score")
+    max_interactions: int = Field(default=100, description="Maximum number of interactions to return")
+
+class PathwayAnalysisParams(BaseModel):
+    """Parameters for pathway analysis"""
+    genes: List[str] = Field(description="List of gene identifiers")
+    pathway_types: List[str] = Field(default_factory=list, description="Types of pathways to include")
+    species: str = Field(default="homo_sapiens", description="Species to analyze")
+    include_child_pathways: bool = Field(default=True, description="Include child pathways")
+
+class GeneticVariantParams(BaseModel):
+    """Parameters for genetic variant analysis"""
+    gene: str = Field(description="Gene identifier")
+    variant_types: List[str] = Field(default_factory=list, description="Types of variants to include")
+    clinical_significance: Optional[List[str]] = Field(default=None, description="Clinical significance levels")
+    population: Optional[str] = Field(default=None, description="Population identifier")
+
+class MolecularMechanismParams(BaseModel):
+    """Parameters for molecular mechanism analysis"""
+    protein_id: str = Field(description="Protein identifier")
+    mechanism_types: List[str] = Field(description="Types of mechanisms to analyze")
+    include_interactions: bool = Field(default=True, description="Include protein interactions")
+    include_pathways: bool = Field(default=True, description="Include pathway information")
+
+
 # OpenAI tool definitions
 BIOCHAT_TOOLS = [
     {
@@ -69,6 +99,38 @@ BIOCHAT_TOOLS = [
             "description": "Get detailed protein information from UniProt. Use this when the user asks about protein structure, function, or annotations.",
             "parameters": ProteinInfoParams.model_json_schema(),
             "required": ["protein_id"]
+        }
+    },
+        {
+        "type": "function",
+        "function": {
+            "name": "analyze_protein_interactions",
+            "description": "Analyze protein-protein interactions and their functional implications",
+            "parameters": ProteinInteractionParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_pathways",
+            "description": "Analyze biological pathways and their regulation",
+            "parameters": PathwayAnalysisParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_genetic_variants",
+            "description": "Analyze genetic variants and their clinical implications",
+            "parameters": GeneticVariantParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_molecular_mechanisms",
+            "description": "Analyze molecular mechanisms and signaling pathways",
+            "parameters": MolecularMechanismParams.model_json_schema()
         }
     }
 ]
