@@ -1,6 +1,6 @@
 """
 Module for accessing various bioinformatics database APIs.
-Includes NCBI E-utilities, Ensembl, GWAS Catalog, and UniProt.
+Includes NCBI E-utilities, Ensembl, GWAS Catalog, UniProt, STRING, Reactome, IntAct, PharmGKB, and BioGRID.
 """
 
 from typing import Dict, List, Optional, Union
@@ -53,37 +53,96 @@ class BioDatabaseAPI(ABC):
 
 class StringDBClient(BioDatabaseAPI):
     """Client for STRING protein-protein interaction database"""
-    def __init__(self):
-        super().__init__()
-        self.base_url = "https://string-db.org/api"
     
-    async def search(self, query: str) -> Dict:
-        """Implement required search method"""
+    def __init__(self, caller_identity: str='HBP'):
+        """
+        Initialize STRING client.
+        
+        Args:
+            caller_identity: Identifier for your application
+        """
+        super().__init__()
+        self.base_url = "https://version-12-0.string-db.org/api"
+        self.caller_identity = caller_identity
+        
+    async def search(self, identifiers: Union[str, List[str]], 
+                    species: int = 9606,
+                    required_score: int = 400,
+                    network_type: str = "functional") -> Dict:
+        """
+        Search STRING database for protein interactions.
+        
+        Args:
+            identifiers: Protein identifier(s)
+            species: Species NCBI taxonomy ID (default: 9606 for human)
+            required_score: Threshold score (0-1000)
+            network_type: Either 'functional' or 'physical'
+        """
+        if isinstance(identifiers, list):
+            identifiers = "\r".join(identifiers)
+            
         params = {
-            "identifiers": query,
-            "species": 9606,  # Human
+            "identifiers": identifiers,
+            "species": species,
+            "required_score": required_score,
+            "network_type": network_type,
+            "caller_identity": self.caller_identity
+        }
+        return await self._make_request("tsv/interaction_partners", params)
+
+    async def get_network_image(self, identifiers: List[str], 
+                              species: int = 9606,
+                              network_flavor: str = "confidence",
+                              required_score: int = 400) -> bytes:
+        """
+        Get network image visualization for proteins.
+        
+        Args:
+            identifiers: List of protein identifiers
+            species: Species NCBI taxonomy ID
+            network_flavor: Type of network (confidence, evidence, actions)
+            required_score: Minimum interaction score (0-1000)
+        """
+        params = {
+            "identifiers": "\r".join(identifiers),
+            "species": species,
+            "network_flavor": network_flavor,
+            "required_score": required_score,
+            "format": "image"
+        }
+        response = await self._make_request("image/network", params)
+        return response.content
+
+    async def get_functional_enrichment(self, identifiers: List[str],
+                                      species: int = 9606) -> Dict:
+        """
+        Get functional enrichment analysis for proteins.
+        
+        Args:
+            identifiers: List of protein identifiers  
+            species: Species NCBI taxonomy ID
+        """
+        params = {
+            "identifiers": "\r".join(identifiers),
+            "species": species,
             "format": "json"
         }
-        return await self._make_request("json/interaction_partners", params)
-
-    async def get_protein_interactions(self, protein: str) -> Dict:
-        """Get detailed protein-protein interactions"""
-        params = {
-            "identifiers": protein,
-            "species": 9606,
-            "required_score": 400,
-            "network_flavor": "confidence"
-        }
-        return await self._make_request("network", params)
+        return await self._make_request("enrichment", params)
 
 class ReactomeClient(BioDatabaseAPI):
     """Client for Reactome pathway database"""
+    
     def __init__(self):
         super().__init__()
         self.base_url = "https://reactome.org/ContentService/data"
-    
+
     async def search(self, query: str) -> Dict:
-        """Implement required search method"""
+        """
+        Search Reactome database.
+        
+        Args:
+            query: Search query string
+        """
         params = {
             "query": query,
             "species": "Homo sapiens",
@@ -91,67 +150,218 @@ class ReactomeClient(BioDatabaseAPI):
         }
         return await self._make_request("query/enhanced", params)
 
-    async def get_pathways(self, gene: str) -> Dict:
-        """Get pathways involving a gene"""
-        return await self._make_request(f"pathways/entity/{gene}/containedEvents")
+    async def get_pathway_containment(self, pathway_id: str) -> Dict:
+        """
+        Get events contained in a pathway.
+        
+        Args:
+            pathway_id: Reactome pathway identifier
+        """
+        return await self._make_request(f"pathway/{pathway_id}/containedEvents")
+
+    async def get_pathway_ancestors(self, event_id: str) -> Dict:
+        """
+        Get ancestor pathways for an event.
+        
+        Args:
+            event_id: Reactome event identifier  
+        """
+        return await self._make_request(f"event/{event_id}/ancestors")
 
 class IntActClient(BioDatabaseAPI):
     """Client for IntAct molecular interaction database"""
+    
     def __init__(self):
         super().__init__()
-        self.base_url = "https://www.ebi.ac.uk/intact/rest/interaction"
-    
-    async def search(self, query: str) -> Dict:
-        """Implement required search method"""
+        self.base_url = "https://www.ebi.ac.uk/intact/ws/interaction"
+
+    async def search(self, query: str, 
+                    page: int = 0,
+                    page_size: int = 10,
+                    negative_filter: str = "POSITIVE_ONLY",
+                    min_mi_score: float = 0.0,
+                    max_mi_score: float = 1.0) -> Dict:
+        """
+        Search IntAct database.
+        
+        Args:
+            query: Search query string
+            page: Page number for pagination
+            page_size: Number of results per page
+            negative_filter: Filter type (POSITIVE_ONLY, POSITIVE_AND_NEGATIVE, NEGATIVE_ONLY)
+            min_mi_score: Minimum interaction score (0.0-1.0)
+            max_mi_score: Maximum interaction score (0.0-1.0)
+        """
         params = {
             "query": query,
-            "format": "json"
+            "page": page,
+            "pageSize": page_size,
+            "negativeFilter": negative_filter,
+            "minMIScore": min_mi_score,
+            "maxMIScore": max_mi_score
         }
         return await self._make_request("findInteractions", params)
 
-    async def get_molecular_interactions(self, protein: str) -> Dict:
-        """Get detailed molecular interactions"""
+    async def get_interactions_by_interactor(self, protein: str,
+                                          negative: str = "POSITIVE_ONLY",
+                                          min_mi_score: float = 0.0,
+                                          max_mi_score: float = 1.0) -> Dict:
+        """
+        Get interactions for a specific protein.
+        
+        Args:
+            protein: Protein identifier
+            negative: Filter for interaction type
+            min_mi_score: Minimum interaction score
+            max_mi_score: Maximum interaction score
+        """
         params = {
             "query": f"id:{protein}",
             "format": "json",
-            "negative": "false"
+            "negative": negative,
+            "minMIScore": min_mi_score,
+            "maxMIScore": max_mi_score
         }
         return await self._make_request("findInteractions", params)
 
 class PharmGKBClient(BioDatabaseAPI):
     """Client for PharmGKB pharmacogenomics database"""
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.base_url = "https://api.pharmgkb.org/v1/data"
     
+    def __init__(self):
+        super().__init__(self)
+        self.base_url = "https://api.pharmgkb.org/v1/data"
+
     async def search(self, query: str) -> Dict:
-        """Implement required search method"""
+        """
+        Search PharmGKB database.
+        
+        Args:
+            query: Search query string
+        """
         return await self._make_request(f"search?q={query}")
 
-    async def get_drug_gene_relationships(self, gene: str) -> Dict:
-        """Get drug-gene relationships"""
-        return await self._make_request(f"relationships/gene/{gene}")
+    async def get_pathway(self, pathway_id: str, view: str = "base") -> Dict:
+        """
+        Get pathway information.
+        
+        Args:
+            pathway_id: PharmGKB pathway identifier
+            view: Data view level (min, base, max)
+        """
+        params = {"view": view}
+        return await self._make_request(f"pathway/{pathway_id}", params)
 
-class DisGeNETClient(BioDatabaseAPI):
-    """Client for DisGeNET disease-gene associations database"""
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.base_url = "https://www.disgenet.org/api"
+    async def get_gene(self, gene_id: str) -> Dict:
+        """
+        Get gene information.
+        
+        Args:
+            gene_id: PharmGKB gene identifier
+        """
+        return await self._make_request(f"gene/{gene_id}")
+
+    async def get_drug_gene_relationships(self, gene_id: str) -> Dict:
+        """
+        Get drug-gene relationships.
+        
+        Args:
+            gene_id: PharmGKB gene identifier
+        """
+        return await self._make_request(f"relationships/gene/{gene_id}")
+
+class BioGridClient(BioDatabaseAPI):
+    """Client for BioGRID interaction database"""
     
-    async def search(self, query: str) -> Dict:
-        """Implement required search method"""
-        params = {"q": query}
-        return await self._make_request("search", params)
+    def __init__(self, access_key: str):
+        """
+        Initialize BioGRID client.
+        
+        Args:
+            access_key: Required 32-character access key from BioGRID
+        """
+        super().__init__(api_key=access_key)
+        self.base_url = "https://webservice.thebiogrid.org"
 
-    async def get_gene_disease_associations(self, gene: str) -> Dict:
-        """Get disease associations for a gene"""
-        params = {"gene": gene}
-        return await self._make_request("gda/gene", params)
+    async def search(self, gene_list: List[str],
+                    tax_id: Optional[str] = None,
+                    search_ids: bool = False,
+                    search_names: bool = True,  
+                    search_biogrid_ids: bool = False,
+                    include_interactors: bool = True,
+                    max_results: int = 10000,
+                    start: int = 0,
+                    format: str = "tab2") -> Dict:
+        """
+        Search BioGRID database.
+        
+        Args:
+            gene_list: List of gene identifiers
+            tax_id: NCBI taxonomy ID (e.g., "9606" for human)
+            search_ids: Search ENTREZ_GENE, ORDERED LOCUS and SYSTEMATIC_NAME
+            search_names: Search OFFICIAL_SYMBOL
+            search_biogrid_ids: Search BioGRID internal IDs
+            include_interactors: Include first-order interactors
+            max_results: Number of results (1-10000)
+            start: Starting result index
+            format: Output format (tab1, tab2, json)
+        """
+        params = {
+            "geneList": "|".join(gene_list),
+            "searchIds": str(search_ids).lower(),
+            "searchNames": str(search_names).lower(),
+            "searchBiogridIds": str(search_biogrid_ids).lower(),
+            "includeInteractors": str(include_interactors).lower(),
+            "max": max_results,
+            "start": start,
+            "format": format,
+            "accessKey": self.api_key
+        }
+        
+        if tax_id:
+            params["taxId"] = tax_id
+            
+        return await self._make_request("interactions", params)
+
+    async def get_interactions(self,
+                             gene_list: List[str],
+                             tax_id: Optional[str] = None,
+                             include_interactors: bool = True,
+                             evidence_list: Optional[List[str]] = None,
+                             format: str = "tab2") -> Dict:
+        """
+        Get protein interactions filtered by various parameters.
+        
+        Args:
+            gene_list: List of gene identifiers
+            tax_id: NCBI taxonomy ID
+            include_interactors: Include first-order interactors
+            evidence_list: List of experimental evidence codes
+            format: Output format (tab2, json)
+        """
+        params = {
+            "geneList": "|".join(gene_list),
+            "includeInteractors": str(include_interactors).lower(),
+            "format": format,
+            "accessKey": self.api_key
+        }
+        
+        if tax_id:
+            params["taxId"] = tax_id
+            
+        if evidence_list:
+            params["evidenceList"] = "|".join(evidence_list)
+            
+        return await self._make_request("interactions", params)
+
+    async def get_version(self) -> str:
+        """Get current BioGRID version."""
+        response = await self._make_request("version", {"accessKey": self.api_key})
+        return response.text
 
 class BioCyc(BioDatabaseAPI):
     """Client for BioCyc pathway/genome database"""
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
+    def __init__(self,):
+        super().__init__()
         self.base_url = "https://websvc.biocyc.org"
         
     async def search(self, query: str) -> Dict:
@@ -187,29 +397,6 @@ class BioCyc(BioDatabaseAPI):
         }
         return await self._make_request("getRegulation", params)
     
-class BioGridClient(BioDatabaseAPI):
-    """Client for BioGRID interaction database"""
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.base_url = "https://webservice.thebiogrid.org"
-
-    async def search(self, query: str) -> Dict:
-        """Implement required search method"""
-        params = {
-            "searchNames": query,
-            "format": "json"
-        }
-        return await self._make_request("interactions", params)
-
-    async def get_protein_interactions(self, gene: str) -> Dict:
-        """Get detailed protein interactions"""
-        params = {
-            "searchNames": gene,
-            "format": "json",
-            "includeInteractors": True
-        }
-        return await self._make_request("interactions", params)
-
 class NCBIEutils(BioDatabaseAPI):
     """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
     
@@ -495,36 +682,4 @@ class UniProtAPI(BioDatabaseAPI):
         endpoint = f"uniprotkb/{uniprot_id}/features"
         response = self._make_request(endpoint)
         return response.json()
-
-# # Example usage:
-# if __name__ == "__main__":
-#     # Initialize clients
-#     ncbi = NCBIEutils(
-#         api_key="your_api_key",
-#         tool="your_tool_name",
-#         email="your_email@example.com"
-#     )
     
-#     # Example search combining gene and phenotype
-#     results = ncbi.search_and_analyze(
-#         genes=["DSP", "BRCA2"],
-#         phenotypes=["Breast Neoplasms"],
-#         additional_terms=["prognosis"],
-#         max_results=50
-#     )
-    
-#     # Process results
-#     for pmid, article in results['articles'].items():
-#         print(f"Title: {article['title']}")
-#         print(f"Abstract: {article['abstract'][:200]}...")
-#         print("-" * 80)
-    
-#     ensembl = EnsemblAPI()
-#     gwas = GWASCatalog()
-#     uniprot = UniProtAPI()
-    
-#     # Example searches
-#     ensembl_results = ensembl.search("DSP")
-#     gwas_results = gwas.search("diabetes")
-#     uniprot_results = uniprot.search("insulin")
-
