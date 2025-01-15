@@ -33,7 +33,6 @@ class ProteinInfoParams(BaseModel):
     protein_id: str = Field(description="UniProt identifier or gene name")
     include_features: bool = Field(default=True, description="Include protein features in the response")
 
-
 class ProteinInteractionParams(BaseModel):
     """Parameters for protein interaction queries"""
     protein_id: str = Field(description="Protein identifier")
