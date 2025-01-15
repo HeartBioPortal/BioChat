@@ -32,6 +32,7 @@ def integration_orchestrator():
     orchestrator = BioChatOrchestrator(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         ncbi_api_key=os.getenv("NCBI_API_KEY"),
+        biogrid_access_key=os.getenv("BIOGRID_ACCESS_KEY"),
         tool_name="biochat_integration_tests",
         email=os.getenv("CONTACT_EMAIL")
     )

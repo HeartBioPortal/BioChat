@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 from src.APIHub import (
     NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI,
-    StringDBClient, ReactomeClient, PharmGKBClient, DisGeNETClient,
+    StringDBClient, ReactomeClient, PharmGKBClient,
     IntActClient, BioCyc, BioGridClient
 )
 from src.schemas import (
@@ -12,7 +12,7 @@ from src.schemas import (
 )
 
 class ToolExecutor:
-    def __init__(self, ncbi_api_key: str, tool_name: str, email: str, api_keys: Dict[str, str] = None):
+    def __init__(self, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str):
         """Initialize database clients with appropriate credentials"""
         # Initialize core clients
         self.ncbi = NCBIEutils(api_key=ncbi_api_key, tool=tool_name, email=email)
@@ -25,12 +25,9 @@ class ToolExecutor:
         self.reactome = ReactomeClient()
         self.intact = IntActClient()
         
-        # Initialize auth-required ?! clients 
-        api_keys = api_keys or {}
-        self.pharmgkb = PharmGKBClient(api_keys.get("pharmgkb")) if api_keys.get("pharmgkb") else PharmGKBClient(None)
-        self.disgenet = DisGeNETClient(api_keys.get("disgenet")) if api_keys.get("disgenet") else DisGeNETClient(None)
-        self.biocyc = BioCyc(api_keys.get("biocyc")) if api_keys.get("biocyc") else BioCyc(None)
-        self.biogrid = BioGridClient(api_keys.get("biogrid")) if api_keys.get("biogrid") else BioGridClient(None)
+        self.pharmgkb = PharmGKBClient()
+        self.biocyc = BioCyc()
+        self.biogrid = BioGridClient(access_key=biogrid_access_key)
         
         # Track available services
         self.available_services = {
@@ -45,7 +42,6 @@ class ToolExecutor:
             "intact": True,
             # Auth-required services
             "pharmgkb": True,
-            "disgenet": True,
             "biocyc": True,
             "biogrid": True
         }
@@ -104,14 +100,6 @@ class ToolExecutor:
                 "genes": [params.protein_id]
             })
             
-        # Add gene-disease associations
-        try:
-            results["disease_associations"] = await self.disgenet.get_gene_disease_associations(
-                params.protein_id
-            )
-        except Exception as e:
-            results["disease_associations"] = {"error": str(e)}
-        
         return {
             "protein_id": params.protein_id,
             "mechanism_data": results,
@@ -216,13 +204,6 @@ class ToolExecutor:
                 results["clinical_data"]["pharmgkb"] = pharmgkb_data
             except Exception as e:
                 results["clinical_data"]["pharmgkb"] = {"error": str(e)}
-
-            # Add disease associations if available
-            try:
-                disgenet_data = await self.disgenet.get_gene_disease_associations(params.gene)
-                results["clinical_data"]["disgenet"] = disgenet_data
-            except Exception as e:
-                results["clinical_data"]["disgenet"] = {"error": str(e)}
 
             return results
         except Exception as e:
