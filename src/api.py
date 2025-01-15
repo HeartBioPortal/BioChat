@@ -17,9 +17,10 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ncbi_api_key = os.getenv("NCBI_API_KEY")
 contact_email = os.getenv("CONTACT_EMAIL")
+biogrid_access_key = os.getenv("BIOGRID_ACCESS_KEY")
 
 # Validate required environment variables
-required_env_vars = ["OPENAI_API_KEY", "NCBI_API_KEY", "CONTACT_EMAIL"]
+required_env_vars = ["OPENAI_API_KEY", "NCBI_API_KEY", "CONTACT_EMAIL", "BIOGRID_ACCESS_KEY"]
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
@@ -73,7 +74,7 @@ def get_orchestrator() -> BioChatOrchestrator:
             openai_api_key = os.environ.get("OPENAI_API_KEY")
             ncbi_api_key = os.environ.get("NCBI_API_KEY")
             contact_email = os.environ.get("CONTACT_EMAIL")
-
+            biogrid_access_key = os.getenv("BIOGRID_ACCESS_KEY")
             # Check for missing environment variables
             missing_vars = []
             if not openai_api_key:
@@ -82,6 +83,8 @@ def get_orchestrator() -> BioChatOrchestrator:
                 missing_vars.append("NCBI_API_KEY")
             if not contact_email:
                 missing_vars.append("CONTACT_EMAIL")
+            if not biogrid_access_key:
+                missing_vars.append("BIOGRID_ACCESS_KEY")
 
             if missing_vars:
                 raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
@@ -90,6 +93,7 @@ def get_orchestrator() -> BioChatOrchestrator:
             orchestrator = BioChatOrchestrator(
                 openai_api_key=openai_api_key,
                 ncbi_api_key=ncbi_api_key,
+                biogrid_access_key=biogrid_access_key,
                 tool_name="BioChat",
                 email=contact_email
             )
