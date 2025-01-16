@@ -5,17 +5,14 @@ from tests.utils.logger import test_logger
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complex_query(integration_orchestrator, clear_conversation_history):
-    """Test querying multiple genes and their interactions"""
-
-    query = """ What is the mechanistic relationship between PCSK9 and atherosclerotic plaque development in 
+    """Test handling of a complex technical query"""
+    query = """What is the mechanistic relationship between PCSK9 and atherosclerotic plaque development in 
     coronary artery disease, specifically addressing: (1) the protein's role in LDL receptor recycling and 
-    its impact on plasma LDL-cholesterol levels, (2) its influence on vascular inflammation through NF-κB signaling pathways,
-    (3) the clinical implications of gain-of-function versus loss-of-function PCSK9 genetic variants on cardiovascular outcomes,
-    and (4) how these molecular mechanisms inform current therapeutic approaches using PCSK9 inhibitors. Include discussion of 
-    recent findings regarding potential LDL-receptor-independent effects of PCSK9 on atherosclerosis progression and any 
-    emerging evidence for sex-specific differences in PCSK9-mediated cardiovascular risk."""
+    its impact on plasma LDL-cholesterol levels, (2) its influence on vascular inflammation through NF-κB signaling pathways..."""
+    
     response = await integration_orchestrator.process_query(query)
     
+    # Log the complete conversation
     test_logger.log_conversation(
         test_name="Complex and technical Query",
         query=query,
@@ -23,8 +20,23 @@ async def test_complex_query(integration_orchestrator, clear_conversation_histor
         conversation_history=integration_orchestrator.get_conversation_history()
     )
     
+    # Verify response structure and content
     assert isinstance(response, str)
-    assert len(response) > 200
+    assert len(response) > 200  # Response should be substantive
+    assert "PCSK9" in response and "LDL" in response
+    assert "mechanistic" in response.lower() or "mechanism" in response.lower()
+    
+    # Verify conversation history
+    history = integration_orchestrator.get_conversation_history()
+    assert len(history) >= 2  # At least query and response
+    
+    # Verify tool usage
+    tool_calls = [msg for msg in history if msg.get("tool_calls")]
+    if tool_calls:
+        assert any(
+            call["function"]["name"] in ["analyze_molecular_mechanisms", "search_literature"]
+            for call in tool_calls[0].get("tool_calls", [])
+        )
 
 
 @pytest.mark.integration
