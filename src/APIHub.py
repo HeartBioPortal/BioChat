@@ -4,13 +4,17 @@ Includes NCBI E-utilities, Ensembl, GWAS Catalog, UniProt, STRING, Reactome, Int
 """
 
 from typing import Dict, List, Optional, Union
-import requests
 from abc import ABC, abstractmethod
 import json
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import time
 import aiohttp
+import asyncio
+import logging
+import ssl
+
+logger = logging.getLogger(__name__)
 
 class BioDatabaseAPI(ABC):
     """Abstract base class for biological database APIs."""
@@ -29,54 +33,284 @@ class BioDatabaseAPI(ABC):
         self.email = email
         self.base_url = ""
         self.headers = {"Content-Type": "application/json"}
+        self.session: Optional[aiohttp.ClientSession] = None
         if api_key:
             self.headers["Authorization"] = f"Bearer {api_key}"
+
+    async def _init_session(self):
+        """Initialize aiohttp session if not exists"""
+        if self.session is None or self.session.closed:
+            # Create SSL context that doesn't verify certificates
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            conn = aiohttp.TCPConnector(ssl=ssl_context)
+            self.session = aiohttp.ClientSession(connector=conn)
+
+    async def _close_session(self):
+        """Close aiohttp session if exists"""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            self.session = None
     
-    @abstractmethod
-    def search(self, query: str) -> Dict:
-        """Base search method to be implemented by child classes."""
-        pass
-    
-    def _make_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> requests.Response:
+    async def _make_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> Dict:
         """
-        Helper method to make HTTP requests with rate limiting.
+        Helper method to make async HTTP requests with rate limiting.
         Args:
             endpoint: API endpoint
             params: Query parameters
             delay: Time to wait between requests (default: 0.34s for NCBI compliance)
         """
-        time.sleep(delay)
+        await self._init_session()
+        await asyncio.sleep(delay)
+        
         url = f"{self.base_url}/{endpoint}"
-        response = requests.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
-        return response
-
-class StringDBClient(BioDatabaseAPI):
-    """Client for STRING protein-protein interaction database"""
+        try:
+            async with self.session.get(url, headers=self.headers, params=params) as response:
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as e:
+            logger.error(f"API request error: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in API request: {str(e)}")
+            raise
     
-    def __init__(self, caller_identity: str='HBP'):
+    @abstractmethod
+    async def search(self, query: str) -> Dict:
+        """Base search method to be implemented by child classes."""
+        pass
+
+    async def _make_raw_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> str:
+        """Make request and return raw text response"""
+        await self._init_session()
+        await asyncio.sleep(delay)
+        
+        url = f"{self.base_url}/{endpoint}"
+        try:
+            async with self.session.get(url, headers=self.headers, params=params) as response:
+                response.raise_for_status()
+                return await response.text()
+        except Exception as e:
+            logger.error(f"Raw request error: {str(e)}")
+            raise
+
+    async def __aenter__(self):
+        """Async context manager enter"""
+        await self._init_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self._close_session()
+
+class NCBIEutils(BioDatabaseAPI):
+    """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
+    
+    def __init__(self, api_key: Optional[str] = None, tool: str = "python_bio_api", email: Optional[str] = None):
+        super().__init__(api_key=api_key, tool=tool, email=email)
+        self.base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    
+    async def search(self, query: str) -> Dict:
+        """Implement the abstract search method for NCBI"""
+        params = self._build_base_params()
+        params.update({
+            "db": "pubmed",
+            "term": query,
+            "retmode": "json"
+        })
+        return await self._make_request("esearch.fcgi", params)
+        
+    def _build_base_params(self) -> Dict:
+        """Build base parameters required for E-utilities."""
+        params = {
+            "tool": self.tool
+        }
+        if self.api_key:
+            params["api_key"] = self.api_key
+        if self.email:
+            params["email"] = self.email
+        return params
+
+    async def search_pubmed(self, 
+                         genes: Optional[List[str]] = None,
+                         phenotypes: Optional[List[str]] = None,
+                         additional_terms: Optional[List[str]] = None,
+                         date_range: Optional[tuple] = None,
+                         max_results: int = 100) -> Dict:
         """
-        Initialize STRING client.
+        Advanced PubMed search combining genes, phenotypes, and other terms.
         
         Args:
-            caller_identity: Identifier for your application
+            genes: List of gene names or symbols
+            phenotypes: List of phenotypes or diseases
+            additional_terms: Additional search terms
+            date_range: Tuple of (start_date, end_date) in YYYY/MM/DD format
+            max_results: Maximum number of results to return
         """
+        query_parts = []
+        
+        if genes:
+            gene_query = ' OR '.join([f"{gene}[Gene Symbol]" for gene in genes])
+            query_parts.append(f"({gene_query})")
+            
+        if phenotypes:
+            phenotype_query = ' OR '.join([f"{pheno}[MeSH Terms]" for pheno in phenotypes])
+            query_parts.append(f"({phenotype_query})")
+            
+        if additional_terms:
+            terms_query = ' AND '.join([f"({term})" for term in additional_terms])
+            query_parts.append(terms_query)
+            
+        final_query = ' AND '.join(query_parts)
+        
+        if date_range:
+            start_date, end_date = date_range
+            final_query += f" AND ({start_date}[Date - Publication] : {end_date}[Date - Publication])"
+        
+        search_params = self._build_base_params()
+        search_params.update({
+            "db": "pubmed",
+            "term": final_query,
+            "retmax": max_results,
+            "retmode": "json",
+            "usehistory": "y"
+        })
+        
+        search_result = await self._make_request("esearch.fcgi", search_params)
+        
+        if 'esearchresult' in search_result and 'idlist' in search_result['esearchresult']:
+            ids = search_result['esearchresult']['idlist']
+            return await self.fetch_pubmed_details(ids)
+        
+        return search_result
+
+    async def fetch_pubmed_details(self, id_list: List[str]) -> Dict:
+        """
+        Fetch detailed information for PubMed articles.
+        
+        Args:
+            id_list: List of PubMed IDs
+        """
+        summary_params = self._build_base_params()
+        summary_params.update({
+            "db": "pubmed",
+            "id": ",".join(id_list),
+            "retmode": "json"
+        })
+        
+        return await self._make_request("esummary.fcgi", summary_params)
+
+    async def extract_abstracts(self, id_list: List[str]) -> Dict[str, str]:
+        """
+        Fetch and extract abstracts for given PubMed IDs.
+        
+        Args:
+            id_list: List of PubMed IDs
+        """
+        fetch_params = self._build_base_params()
+        fetch_params.update({
+            "db": "pubmed",
+            "id": ",".join(id_list),
+            "rettype": "abstract",
+            "retmode": "xml"
+        })
+        
+        response = await self._make_raw_request("efetch.fcgi", fetch_params)
+        root = ET.fromstring(response)
+        
+        abstracts = {}
+        for article in root.findall(".//PubmedArticle"):
+            pmid = article.find(".//PMID").text
+            abstract_element = article.find(".//Abstract/AbstractText")
+            if abstract_element is not None:
+                abstracts[pmid] = abstract_element.text
+            else:
+                abstracts[pmid] = None
+                
+        return abstracts
+
+    async def search_and_analyze(self,
+                             genes: Optional[List[str]] = None,
+                             phenotypes: Optional[List[str]] = None,
+                             additional_terms: Optional[List[str]] = None,
+                             max_results: int = 100) -> Dict:
+        """
+        Comprehensive search and analysis of PubMed articles.
+        
+        Args:
+            genes: List of gene names
+            phenotypes: List of phenotypes
+            additional_terms: Additional search terms
+            max_results: Maximum number of results
+        """
+        try:
+            search_results = await self.search_pubmed(
+                genes=genes,
+                phenotypes=phenotypes,
+                additional_terms=additional_terms,
+                max_results=max_results
+            )
+            
+            if 'result' in search_results:
+                pmids = list(search_results['result'].keys())
+                if 'uids' in search_results['result']:
+                    pmids = search_results['result']['uids']
+            else:
+                return {"error": "No results found"}
+                
+            abstracts = await self.extract_abstracts(pmids)
+            
+            combined_results = {
+                "metadata": {
+                    "query": {
+                        "genes": genes,
+                        "phenotypes": phenotypes,
+                        "additional_terms": additional_terms
+                    },
+                    "total_results": len(pmids)
+                },
+                "articles": {}
+            }
+            
+            for pmid in pmids:
+                if pmid in search_results['result']:
+                    article_data = search_results['result'][pmid]
+                    combined_results['articles'][pmid] = {
+                        "title": article_data.get('title', ''),
+                        "authors": article_data.get('authors', []),
+                        "journal": article_data.get('source', ''),
+                        "pubdate": article_data.get('pubdate', ''),
+                        "abstract": abstracts.get(pmid, '')
+                    }
+                    
+            return combined_results
+            
+        except Exception as e:
+            logger.error(f"Error in search_and_analyze: {str(e)}")
+            return {"error": str(e)}
+
+class StringDBClient(BioDatabaseAPI):
+    def __init__(self, caller_identity: str = 'HBP'):
         super().__init__()
+        # Correct base URL from documentation
         self.base_url = "https://version-12-0.string-db.org/api"
         self.caller_identity = caller_identity
         
-    async def search(self, identifiers: Union[str, List[str]], 
-                    species: int = 9606,
-                    required_score: int = 400,
-                    network_type: str = "functional") -> Dict:
+    async def search(self, 
+                           identifiers: Union[str, List[str]], 
+                           species: int = 9606,
+                           required_score: int = 0,  # Changed to match docs (0-1000)
+                           network_type: str = "functional") -> Dict:
         """
-        Search STRING database for protein interactions.
+        Get protein interactions matching documented parameters.
         
         Args:
-            identifiers: Protein identifier(s)
-            species: Species NCBI taxonomy ID (default: 9606 for human)
-            required_score: Threshold score (0-1000)
-            network_type: Either 'functional' or 'physical'
+            identifiers: protein identifiers (separated by \r)
+            species: NCBI taxonomy ID (e.g., 9606 for human)
+            required_score: threshold (0-1000)
+            network_type: functional (default) or physical
         """
         if isinstance(identifiers, list):
             identifiers = "\r".join(identifiers)
@@ -86,22 +320,17 @@ class StringDBClient(BioDatabaseAPI):
             "species": species,
             "required_score": required_score,
             "network_type": network_type,
-            "caller_identity": self.caller_identity
+            "caller_identity": self.caller_identity  # Required per docs
         }
         return await self._make_request("tsv/interaction_partners", params)
 
-    async def get_network_image(self, identifiers: List[str], 
-                              species: int = 9606,
-                              network_flavor: str = "confidence",
-                              required_score: int = 400) -> bytes:
+    async def get_network_image(self, 
+                            identifiers: List[str], 
+                            species: int = 9606,
+                            network_flavor: str = "confidence",
+                            required_score: int = 400) -> bytes:
         """
         Get network image visualization for proteins.
-        
-        Args:
-            identifiers: List of protein identifiers
-            species: Species NCBI taxonomy ID
-            network_flavor: Type of network (confidence, evidence, actions)
-            required_score: Minimum interaction score (0-1000)
         """
         params = {
             "identifiers": "\r".join(identifiers),
@@ -110,17 +339,14 @@ class StringDBClient(BioDatabaseAPI):
             "required_score": required_score,
             "format": "image"
         }
-        response = await self._make_request("image/network", params)
-        return response.content
+        response = await self._make_raw_request("image/network", params)
+        return response
 
-    async def get_functional_enrichment(self, identifiers: List[str],
-                                      species: int = 9606) -> Dict:
+    async def get_functional_enrichment(self, 
+                                    identifiers: List[str],
+                                    species: int = 9606) -> Dict:
         """
         Get functional enrichment analysis for proteins.
-        
-        Args:
-            identifiers: List of protein identifiers  
-            species: Species NCBI taxonomy ID
         """
         params = {
             "identifiers": "\r".join(identifiers),
@@ -168,6 +394,43 @@ class ReactomeClient(BioDatabaseAPI):
         """
         return await self._make_request(f"event/{event_id}/ancestors")
 
+    async def get_pathways(self, genes: List[str], species: str = "homo_sapiens") -> Dict:
+        """
+        Get pathway data for a list of genes.
+        
+        Args:
+            genes: List of gene identifiers
+            species: Species name (default: homo_sapiens)
+        """
+        results = {}
+        for gene in genes:
+            try:
+                params = {
+                    "query": gene,
+                    "species": species,
+                    "types": "Pathway"
+                }
+                gene_results = await self._make_request("query/enhanced", params)
+                if gene_results:
+                    pathway_details = []
+                    for pathway in gene_results.get('pathways', []):
+                        try:
+                            details = await self.get_pathway_containment(pathway['id'])
+                            pathway_details.append({
+                                "pathway_id": pathway['id'],
+                                "pathway_name": pathway['name'],
+                                "details": details
+                            })
+                        except Exception as e:
+                            logger.warning(f"Error getting pathway details for {pathway['id']}: {str(e)}")
+                    
+                    results[gene] = pathway_details
+            except Exception as e:
+                logger.error(f"Error getting pathways for gene {gene}: {str(e)}")
+                results[gene] = {"error": str(e)}
+                
+        return results
+
 class IntActClient(BioDatabaseAPI):
     """Client for IntAct molecular interaction database"""
     
@@ -175,12 +438,13 @@ class IntActClient(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://www.ebi.ac.uk/intact/ws/interaction"
 
-    async def search(self, query: str, 
-                    page: int = 0,
-                    page_size: int = 10,
-                    negative_filter: str = "POSITIVE_ONLY",
-                    min_mi_score: float = 0.0,
-                    max_mi_score: float = 1.0) -> Dict:
+    async def search(self, 
+                  query: str, 
+                  page: int = 0,
+                  page_size: int = 10,
+                  negative_filter: str = "POSITIVE_ONLY",
+                  min_mi_score: float = 0.0,
+                  max_mi_score: float = 1.0) -> Dict:
         """
         Search IntAct database.
         
@@ -202,10 +466,11 @@ class IntActClient(BioDatabaseAPI):
         }
         return await self._make_request("findInteractions", params)
 
-    async def get_interactions_by_interactor(self, protein: str,
-                                          negative: str = "POSITIVE_ONLY",
-                                          min_mi_score: float = 0.0,
-                                          max_mi_score: float = 1.0) -> Dict:
+    async def get_molecular_interactions(self, 
+                                    protein: str,
+                                    negative: str = "POSITIVE_ONLY",
+                                    min_mi_score: float = 0.0,
+                                    max_mi_score: float = 1.0) -> Dict:
         """
         Get interactions for a specific protein.
         
@@ -222,13 +487,17 @@ class IntActClient(BioDatabaseAPI):
             "minMIScore": min_mi_score,
             "maxMIScore": max_mi_score
         }
-        return await self._make_request("findInteractions", params)
+        try:
+            return await self._make_request("findInteractions", params)
+        except Exception as e:
+            logger.error(f"Error getting molecular interactions for {protein}: {str(e)}")
+            return {"error": str(e)}
 
 class PharmGKBClient(BioDatabaseAPI):
     """Client for PharmGKB pharmacogenomics database"""
     
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
         self.base_url = "https://api.pharmgkb.org/v1/data"
 
     async def search(self, query: str) -> Dict:
@@ -238,7 +507,11 @@ class PharmGKBClient(BioDatabaseAPI):
         Args:
             query: Search query string
         """
-        return await self._make_request(f"search?q={query}")
+        try:
+            return await self._make_request(f"search?q={query}")
+        except Exception as e:
+            logger.error(f"PharmGKB search error: {str(e)}")
+            return {"error": str(e)}
 
     async def get_pathway(self, pathway_id: str, view: str = "base") -> Dict:
         """
@@ -249,7 +522,11 @@ class PharmGKBClient(BioDatabaseAPI):
             view: Data view level (min, base, max)
         """
         params = {"view": view}
-        return await self._make_request(f"pathway/{pathway_id}", params)
+        try:
+            return await self._make_request(f"pathway/{pathway_id}", params)
+        except Exception as e:
+            logger.error(f"Error getting pathway {pathway_id}: {str(e)}")
+            return {"error": str(e)}
 
     async def get_gene(self, gene_id: str) -> Dict:
         """
@@ -258,7 +535,11 @@ class PharmGKBClient(BioDatabaseAPI):
         Args:
             gene_id: PharmGKB gene identifier
         """
-        return await self._make_request(f"gene/{gene_id}")
+        try:
+            return await self._make_request(f"gene/{gene_id}")
+        except Exception as e:
+            logger.error(f"Error getting gene {gene_id}: {str(e)}")
+            return {"error": str(e)}
 
     async def get_drug_gene_relationships(self, gene_id: str) -> Dict:
         """
@@ -267,105 +548,62 @@ class PharmGKBClient(BioDatabaseAPI):
         Args:
             gene_id: PharmGKB gene identifier
         """
-        return await self._make_request(f"relationships/gene/{gene_id}")
+        try:
+            return await self._make_request(f"relationships/gene/{gene_id}")
+        except Exception as e:
+            logger.error(f"Error getting drug-gene relationships for {gene_id}: {str(e)}")
+            return {"error": str(e)}
 
 class BioGridClient(BioDatabaseAPI):
     """Client for BioGRID interaction database"""
     
     def __init__(self, access_key: str):
-        """
-        Initialize BioGRID client.
-        
-        Args:
-            access_key: Required 32-character access key from BioGRID
-        """
         super().__init__(api_key=access_key)
         self.base_url = "https://webservice.thebiogrid.org"
 
     async def search(self, gene_list: List[str],
-                    tax_id: Optional[str] = None,
-                    search_ids: bool = False,
-                    search_names: bool = True,  
-                    search_biogrid_ids: bool = False,
-                    include_interactors: bool = True,
-                    max_results: int = 10000,
-                    start: int = 0,
-                    format: str = "tab2") -> Dict:
-        """
-        Search BioGRID database.
-        
-        Args:
-            gene_list: List of gene identifiers
-            tax_id: NCBI taxonomy ID (e.g., "9606" for human)
-            search_ids: Search ENTREZ_GENE, ORDERED LOCUS and SYSTEMATIC_NAME
-            search_names: Search OFFICIAL_SYMBOL
-            search_biogrid_ids: Search BioGRID internal IDs
-            include_interactors: Include first-order interactors
-            max_results: Number of results (1-10000)
-            start: Starting result index
-            format: Output format (tab1, tab2, json)
-        """
+                  tax_id: Optional[str] = None,
+                  max_results: int = 10000) -> Dict:
+        """Search BioGRID database."""
         params = {
             "geneList": "|".join(gene_list),
-            "searchIds": str(search_ids).lower(),
-            "searchNames": str(search_names).lower(),
-            "searchBiogridIds": str(search_biogrid_ids).lower(),
-            "includeInteractors": str(include_interactors).lower(),
+            "searchIds": "true",
+            "searchNames": "true",
             "max": max_results,
-            "start": start,
-            "format": format,
+            "format": "json",
             "accessKey": self.api_key
         }
-        
         if tax_id:
             params["taxId"] = tax_id
             
         return await self._make_request("interactions", params)
 
     async def get_interactions(self,
-                             gene_list: List[str],
-                             tax_id: Optional[str] = None,
-                             include_interactors: bool = True,
-                             evidence_list: Optional[List[str]] = None,
-                             format: str = "tab2") -> Dict:
-        """
-        Get protein interactions filtered by various parameters.
-        
-        Args:
-            gene_list: List of gene identifiers
-            tax_id: NCBI taxonomy ID
-            include_interactors: Include first-order interactors
-            evidence_list: List of experimental evidence codes
-            format: Output format (tab2, json)
-        """
-        params = {
-            "geneList": "|".join(gene_list),
-            "includeInteractors": str(include_interactors).lower(),
-            "format": format,
-            "accessKey": self.api_key
-        }
-        
-        if tax_id:
-            params["taxId"] = tax_id
-            
-        if evidence_list:
-            params["evidenceList"] = "|".join(evidence_list)
-            
-        return await self._make_request("interactions", params)
-
-    async def get_version(self) -> str:
-        """Get current BioGRID version."""
-        response = await self._make_request("version", {"accessKey": self.api_key})
-        return response.text
+                           protein_id: str,
+                           max_results: int = 100) -> Dict:
+        """Get protein interactions."""
+        try:
+            params = {
+                "geneList": protein_id,
+                "searchNames": "true",
+                "max": max_results,
+                "format": "json",
+                "accessKey": self.api_key
+            }
+            return await self._make_request("interactions", params)
+        except Exception as e:
+            logger.error(f"BioGRID interaction error for {protein_id}: {str(e)}")
+            return {"error": str(e)}
 
 class BioCyc(BioDatabaseAPI):
     """Client for BioCyc pathway/genome database"""
-    def __init__(self,):
+    
+    def __init__(self):
         super().__init__()
         self.base_url = "https://websvc.biocyc.org"
         
     async def search(self, query: str) -> Dict:
-        """Implement required search method"""
+        """Search BioCyc database."""
         params = {
             "query": query,
             "organism": "HUMAN",
@@ -373,237 +611,31 @@ class BioCyc(BioDatabaseAPI):
         }
         return await self._make_request("getSearch", params)
 
+    async def get_pathways(self, genes: List[str], include_children: bool = True) -> Dict:
+        """Get pathway data for genes."""
+        results = {}
+        for gene in genes:
+            try:
+                gene_results = {
+                    "pathways": await self.get_metabolic_pathways(gene),
+                    "regulation": await self.get_gene_regulation(gene)
+                }
+                results[gene] = gene_results
+            except Exception as e:
+                logger.error(f"Error getting BioCyc data for {gene}: {str(e)}")
+                results[gene] = {"error": str(e)}
+        return results
+
     async def get_metabolic_pathways(self, gene: str) -> Dict:
-        """Get metabolic pathways for a gene"""
-        params = {
-            "gene": gene,
-            "organism": "HUMAN"
-        }
+        """Get metabolic pathways for a gene."""
+        params = {"gene": gene, "organism": "HUMAN"}
         return await self._make_request("getMetabolicPathways", params)
 
     async def get_pathway_details(self, pathway_id: str) -> Dict:
-        """Get detailed information about a specific pathway"""
-        params = {
-            "pathway": pathway_id,
-            "detail": "full"
-        }
+        """Get detailed pathway information."""
+        params = {"pathway": pathway_id, "detail": "full"}
         return await self._make_request("getPathwayData", params)
 
-    async def get_gene_regulation(self, gene: str) -> Dict:
-        """Get regulation information for a gene"""
-        params = {
-            "gene": gene,
-            "organism": "HUMAN"
-        }
-        return await self._make_request("getRegulation", params)
-    
-class NCBIEutils(BioDatabaseAPI):
-    """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
-    
-    def __init__(self, api_key: Optional[str] = None, tool: str = "python_bio_api", email: Optional[str] = None):
-        super().__init__(api_key=api_key, tool=tool, email=email)
-        self.base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-    
-    def search(self, query: str) -> Dict:
-        """Implement the abstract search method for NCBI"""
-        params = self._build_base_params()
-        params.update({
-            "db": "pubmed",
-            "term": query,
-            "retmode": "json"
-        })
-        response = self._make_request("esearch.fcgi", params)
-        return response.json()
-        
-    def _build_base_params(self) -> Dict:
-        """Build base parameters required for E-utilities."""
-        params = {
-            "tool": self.tool,
-            "api_key": self.api_key,
-        }
-        if self.email:
-            params["email"] = self.email
-        return params
-
-    def search_pubmed(self, 
-                      genes: Optional[List[str]] = None,
-                      phenotypes: Optional[List[str]] = None,
-                      additional_terms: Optional[List[str]] = None,
-                      date_range: Optional[tuple] = None,
-                      max_results: int = 100) -> Dict:
-        """
-        Advanced PubMed search combining genes, phenotypes, and other terms.
-        
-        Args:
-            genes: List of gene names or symbols
-            phenotypes: List of phenotypes or diseases
-            additional_terms: Additional search terms
-            date_range: Tuple of (start_date, end_date) in YYYY/MM/DD format
-            max_results: Maximum number of results to return
-            
-        Returns:
-            Dictionary containing search results and metadata
-        """
-        query_parts = []
-        
-        # Build gene query
-        if genes:
-            gene_query = ' OR '.join([f"{gene}[Gene Symbol]" for gene in genes])
-            query_parts.append(f"({gene_query})")
-            
-        # Build phenotype query
-        if phenotypes:
-            phenotype_query = ' OR '.join([f"{pheno}[MeSH Terms]" for pheno in phenotypes])
-            query_parts.append(f"({phenotype_query})")
-            
-        # Add additional terms
-        if additional_terms:
-            terms_query = ' AND '.join([f"({term})" for term in additional_terms])
-            query_parts.append(terms_query)
-            
-        # Combine all query parts
-        final_query = ' AND '.join(query_parts)
-        
-        # Add date range if specified
-        if date_range:
-            start_date, end_date = date_range
-            final_query += f" AND ({start_date}[Date - Publication] : {end_date}[Date - Publication])"
-        
-        # Initial search to get IDs
-        search_params = self._build_base_params()
-        search_params.update({
-            "db": "pubmed",
-            "term": final_query,
-            "retmax": max_results,
-            "retmode": "json",
-            "usehistory": "y"
-        })
-        
-        search_response = self._make_request("esearch.fcgi", search_params)
-        search_result = search_response.json()
-        
-        # Get article details using ESummary
-        if 'esearchresult' in search_result and 'idlist' in search_result['esearchresult']:
-            ids = search_result['esearchresult']['idlist']
-            return self.fetch_pubmed_details(ids)
-        
-        return search_result
-
-    def fetch_pubmed_details(self, id_list: List[str]) -> Dict:
-        """
-        Fetch detailed information for PubMed articles.
-        
-        Args:
-            id_list: List of PubMed IDs
-            
-        Returns:
-            Dictionary containing detailed article information
-        """
-        summary_params = self._build_base_params()
-        summary_params.update({
-            "db": "pubmed",
-            "id": ",".join(id_list),
-            "retmode": "json"
-        })
-        
-        summary_response = self._make_request("esummary.fcgi", summary_params)
-        return summary_response.json()
-
-    def extract_abstracts(self, id_list: List[str]) -> Dict[str, str]:
-        """
-        Fetch and extract abstracts for given PubMed IDs.
-        
-        Args:
-            id_list: List of PubMed IDs
-            
-        Returns:
-            Dictionary mapping PubMed IDs to their abstracts
-        """
-        fetch_params = self._build_base_params()
-        fetch_params.update({
-            "db": "pubmed",
-            "id": ",".join(id_list),
-            "rettype": "abstract",
-            "retmode": "xml"
-        })
-        
-        response = self._make_request("efetch.fcgi", fetch_params)
-        root = ET.fromstring(response.text)
-        
-        abstracts = {}
-        for article in root.findall(".//PubmedArticle"):
-            pmid = article.find(".//PMID").text
-            abstract_element = article.find(".//Abstract/AbstractText")
-            if abstract_element is not None:
-                abstracts[pmid] = abstract_element.text
-            else:
-                abstracts[pmid] = None
-                
-        return abstracts
-
-    def search_and_analyze(self,
-                          genes: Optional[List[str]] = None,
-                          phenotypes: Optional[List[str]] = None,
-                          additional_terms: Optional[List[str]] = None,
-                          max_results: int = 100) -> Dict:
-        """
-        Comprehensive search and analysis of PubMed articles.
-        
-        Args:
-            genes: List of gene names
-            phenotypes: List of phenotypes
-            additional_terms: Additional search terms
-            max_results: Maximum number of results
-            
-        Returns:
-            Dictionary containing search results and analysis
-        """
-        # Perform initial search
-        search_results = self.search_pubmed(
-            genes=genes,
-            phenotypes=phenotypes,
-            additional_terms=additional_terms,
-            max_results=max_results
-        )
-        
-        # Extract PMIDs
-        if 'result' in search_results:
-            pmids = list(search_results['result'].keys())
-            if 'uids' in search_results['result']:
-                pmids = search_results['result']['uids']
-        else:
-            return {"error": "No results found"}
-            
-        # Get abstracts
-        abstracts = self.extract_abstracts(pmids)
-        
-        # Combine results
-        combined_results = {
-            "metadata": {
-                "query": {
-                    "genes": genes,
-                    "phenotypes": phenotypes,
-                    "additional_terms": additional_terms
-                },
-                "total_results": len(pmids)
-            },
-            "articles": {}
-        }
-        
-        # Combine article details with abstracts
-        for pmid in pmids:
-            if pmid in search_results['result']:
-                article_data = search_results['result'][pmid]
-                combined_results['articles'][pmid] = {
-                    "title": article_data.get('title', ''),
-                    "authors": article_data.get('authors', []),
-                    "journal": article_data.get('source', ''),
-                    "pubdate": article_data.get('pubdate', ''),
-                    "abstract": abstracts.get(pmid, '')
-                }
-                
-        return combined_results
-    
 class EnsemblAPI(BioDatabaseAPI):
     """Ensembl REST API client."""
     
@@ -612,25 +644,24 @@ class EnsemblAPI(BioDatabaseAPI):
         self.base_url = "https://rest.ensembl.org"
         self.headers["Content-Type"] = "application/json"
     
-    def search(self, query: str, species: str = "homo_sapiens") -> Dict:
-        """Implement the abstract search method for Ensembl"""
-        endpoint = f"lookup/symbol/{species}/{query}"
-        response = self._make_request(endpoint)
-        return response.json()
+    async def search(self, query: str, species: str = "homo_sapiens") -> Dict:
+        """Search Ensembl database."""
+        try:
+            endpoint = f"lookup/symbol/{species}/{query}"
+            return await self._make_request(endpoint)
+        except Exception as e:
+            logger.error(f"Ensembl search error: {str(e)}")
+            return {"error": str(e)}
     
-    def get_variants(self, chromosome: str, start: int, end: int, 
-                    species: str = "homo_sapiens") -> Dict:
-        """
-        Get genetic variants in a genomic region.
-        Args:
-            chromosome: Chromosome name
-            start: Start position
-            end: End position
-            species: Species name
-        """
-        endpoint = f"overlap/region/{species}/{chromosome}:{start}-{end}/variation"
-        response = self._make_request(endpoint)
-        return response.json()
+    async def get_variants(self, chromosome: str, start: int, end: int, 
+                       species: str = "homo_sapiens") -> Dict:
+        """Get genetic variants in a genomic region."""
+        try:
+            endpoint = f"overlap/region/{species}/{chromosome}:{start}-{end}/variation"
+            return await self._make_request(endpoint)
+        except Exception as e:
+            logger.error(f"Variant search error: {str(e)}")
+            return {"error": str(e)}
 
 class GWASCatalog(BioDatabaseAPI):
     """GWAS Catalog API client."""
@@ -639,23 +670,24 @@ class GWASCatalog(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://www.ebi.ac.uk/gwas/rest/api"
     
-    def search(self, query: str) -> Dict:
-        """Implement the abstract search method for GWAS Catalog"""
-        endpoint = "studies/search"
-        params = {"q": query}
-        response = self._make_request(endpoint, params)
-        return response.json()
+    async def search(self, query: str) -> Dict:
+        """Search GWAS Catalog."""
+        try:
+            params = {"q": query}
+            return await self._make_request("studies/search", params)
+        except Exception as e:
+            logger.error(f"GWAS search error: {str(e)}")
+            return {"error": str(e)}
     
-    def get_associations(self, study_id: str) -> Dict:
-        """
-        Get associations for a specific study.
-        Args:
-            study_id: GWAS study identifier
-        """
-        endpoint = f"studies/{study_id}/associations"
-        response = self._make_request(endpoint)
-        return response.json()
+    async def get_associations(self, study_id: str) -> Dict:
+        """Get associations for a study."""
+        try:
+            return await self._make_request(f"studies/{study_id}/associations")
+        except Exception as e:
+            logger.error(f"GWAS associations error: {str(e)}")
+            return {"error": str(e)}
 
+# In APIHub.py - Updated UniProtAPI class
 class UniProtAPI(BioDatabaseAPI):
     """UniProt API client."""
     
@@ -663,23 +695,39 @@ class UniProtAPI(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://rest.uniprot.org"
     
-    def search(self, query: str) -> Dict:
-        """Implement the abstract search method for UniProt"""
-        endpoint = "uniprotkb/search"
-        params = {
-            "query": query,
-            "format": "json"
-        }
-        response = self._make_request(endpoint, params)
-        return response.json()
+    async def search(self, query: str) -> Dict:
+        """Search UniProt database."""
+        try:
+            params = {
+                "query": query,
+                "format": "json"
+            }
+            response = await self._make_request("uniprotkb/search", params)
+            # Format the response to ensure it has the expected structure
+            if 'results' in response:
+                return {
+                    'results': [{
+                        'id': item.get('primaryAccession'),
+                        'entry': item.get('entryType'),
+                        'protein_name': item.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value'),
+                        'gene_names': [gene.get('value') for gene in item.get('genes', []) if gene.get('value')],
+                        'organism': item.get('organism', {}).get('scientificName')
+                    } for item in response['results']]
+                }
+            return {'results': []}
+        except Exception as e:
+            logger.error(f"UniProt search error: {str(e)}")
+            return {"error": str(e)}
     
-    def get_protein_features(self, uniprot_id: str) -> Dict:
-        """
-        Get protein features from UniProt.
-        Args:
-            uniprot_id: UniProt identifier
-        """
-        endpoint = f"uniprotkb/{uniprot_id}/features"
-        response = self._make_request(endpoint)
-        return response.json()
-    
+    async def get_protein_features(self, uniprot_id: str) -> Dict:
+        """Get protein features."""
+        try:
+            response = await self._make_request(f"uniprotkb/{uniprot_id}") # Changed endpoint
+            features = await self._make_request(f"uniprotkb/{uniprot_id}/features")
+            return {
+                'features': features,
+                'basic_info': response
+            }
+        except Exception as e:
+            logger.error(f"Protein features error: {str(e)}")
+            return {"error": str(e)}
