@@ -722,12 +722,8 @@ class UniProtAPI(BioDatabaseAPI):
     async def get_protein_features(self, uniprot_id: str) -> Dict:
         """Get protein features."""
         try:
-            response = await self._make_request(f"uniprotkb/{uniprot_id}") # Changed endpoint
-            features = await self._make_request(f"uniprotkb/{uniprot_id}/features")
-            return {
-                'features': features,
-                'basic_info': response
-            }
+            response = await self._make_request(f"uniprotkb/{uniprot_id}")
+            return response
         except Exception as e:
             logger.error(f"Protein features error: {str(e)}")
             return {"error": str(e)}
