@@ -355,81 +355,78 @@ class StringDBClient(BioDatabaseAPI):
         }
         return await self._make_request("enrichment", params)
 
+
 class ReactomeClient(BioDatabaseAPI):
-    """Client for Reactome pathway database"""
+    """Client for Reactome Content Service API"""
     
     def __init__(self):
         super().__init__()
         self.base_url = "https://reactome.org/ContentService/data"
+        self.headers = {"Content-Type": "application/json"}
 
     async def search(self, query: str) -> Dict:
-        """
-        Search Reactome database.
-        
-        Args:
-            query: Search query string
-        """
-        params = {
-            "query": query,
-            "species": "Homo sapiens",
-            "types": "Pathway"
-        }
-        return await self._make_request("query/enhanced", params)
+        """Base search method implementation"""
+        try:
+            # Use search/query endpoint with pathway type
+            params = {
+                "query": query,
+                "species": "Homo sapiens",
+                "types": "Pathway"
+            }
+            endpoint = "search/query"
+            return await self._make_request(endpoint, params)
+        except Exception as e:
+            logger.error(f"Reactome search error: {str(e)}")
+            return {"error": str(e)}
 
-    async def get_pathway_containment(self, pathway_id: str) -> Dict:
-        """
-        Get events contained in a pathway.
-        
-        Args:
-            pathway_id: Reactome pathway identifier
-        """
-        return await self._make_request(f"pathway/{pathway_id}/containedEvents")
+    async def get_pathways_for_gene(self, gene_id: str) -> Dict:
+        """Get pathways involving a specific gene/protein"""
+        try:
+            # Use entity/pathways endpoint with UniProt ID
+            endpoint = f"entity/{gene_id}/pathways"
+            return await self._make_request(endpoint)
+        except Exception as e:
+            logger.error(f"Error getting pathways for gene {gene_id}: {str(e)}")
+            return {"error": str(e)}
 
-    async def get_pathway_ancestors(self, event_id: str) -> Dict:
-        """
-        Get ancestor pathways for an event.
-        
-        Args:
-            event_id: Reactome event identifier  
-        """
-        return await self._make_request(f"event/{event_id}/ancestors")
+    async def get_pathway_details(self, pathway_id: str) -> Dict:
+        """Get detailed information about a specific pathway"""
+        try:
+            # Use pathway endpoint
+            endpoint = f"pathway/{pathway_id}"
+            details = await self._make_request(endpoint)
+            
+            # Get additional pathway information
+            summation = await self._make_request(f"event/{pathway_id}/summation")
+            participants = await self._make_request(f"pathway/{pathway_id}/participants")
+            
+            return {
+                "details": details,
+                "summation": summation,
+                "participants": participants
+            }
+        except Exception as e:
+            logger.error(f"Error getting pathway details for {pathway_id}: {str(e)}")
+            return {"error": str(e)}
 
-    async def get_pathways(self, genes: List[str], species: str = "homo_sapiens") -> Dict:
-        """
-        Get pathway data for a list of genes.
-        
-        Args:
-            genes: List of gene identifiers
-            species: Species name (default: homo_sapiens)
-        """
-        results = {}
-        for gene in genes:
-            try:
-                params = {
-                    "query": gene,
-                    "species": species,
-                    "types": "Pathway"
-                }
-                gene_results = await self._make_request("query/enhanced", params)
-                if gene_results:
-                    pathway_details = []
-                    for pathway in gene_results.get('pathways', []):
-                        try:
-                            details = await self.get_pathway_containment(pathway['id'])
-                            pathway_details.append({
-                                "pathway_id": pathway['id'],
-                                "pathway_name": pathway['name'],
-                                "details": details
-                            })
-                        except Exception as e:
-                            logger.warning(f"Error getting pathway details for {pathway['id']}: {str(e)}")
-                    
-                    results[gene] = pathway_details
-            except Exception as e:
-                logger.error(f"Error getting pathways for gene {gene}: {str(e)}")
-                results[gene] = {"error": str(e)}
-                
-        return results
+    async def get_pathway_hierarchy(self, pathway_id: str) -> Dict:
+        """Get the hierarchical structure of a pathway"""
+        try:
+            endpoint = f"pathway/{pathway_id}/hierarchy"
+            return await self._make_request(endpoint)
+        except Exception as e:
+            logger.error(f"Error getting pathway hierarchy for {pathway_id}: {str(e)}")
+            return {"error": str(e)}
+
+    async def get_disease_events(self, disease_id: str) -> Dict:
+        """Get events associated with a disease"""
+        try:
+            endpoint = f"disease/{disease_id}/events"
+            return await self._make_request(endpoint)
+        except Exception as e:
+            logger.error(f"Error getting disease events for {disease_id}: {str(e)}")
+            return {"error": str(e)}
+
 
 class IntActClient(BioDatabaseAPI):
     """Client for IntAct molecular interaction database"""
