@@ -195,39 +195,47 @@ class ToolExecutor:
             return {"error": f"Interaction analysis failed: {str(e)}"}
 
     async def _execute_pathway_analysis(self, arguments: Dict) -> Dict:
-        """Execute pathway analysis"""
-        try:
+            """Execute pathway analysis using Reactome"""
             params = PathwayAnalysisParams(**arguments)
-            results = {
-                "genes": params.genes,
-                "pathways": {}
-            }
-            
-            # Get Reactome pathways
             try:
-                results["pathways"]["reactome"] = await self.reactome.get_pathways(
-                    genes=params.genes,
-                    species=params.species
-                )
-            except Exception as e:
-                logger.warning(f"Reactome query failed: {str(e)}")
-                results["pathways"]["reactome"] = {"error": str(e)}
+                results = {}
+                
+                if params.gene_id:
+                    # Get pathways for gene
+                    pathways = await self.reactome.get_pathways_for_gene(params.gene_id)
+                    results["gene_pathways"] = pathways
+                    
+                    # Get details for each pathway if requested
+                    if params.include_participants and "pathways" in pathways:
+                        pathway_details = []
+                        for pathway in pathways["pathways"][:5]:  # Limit to top 5 pathways
+                            details = await self.reactome.get_pathway_details(pathway["stId"])
+                            if params.include_hierarchy:
+                                hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
+                                details["hierarchy"] = hierarchy
+                            pathway_details.append(details)
+                        results["pathway_details"] = pathway_details
 
-            # Get BioCyc pathways
-            try:
-                results["pathways"]["biocyc"] = await self.biocyc.get_pathways(
-                    genes=params.genes,
-                    include_children=params.include_child_pathways
-                )
-            except Exception as e:
-                logger.warning(f"BioCyc query failed: {str(e)}")
-                results["pathways"]["biocyc"] = {"error": str(e)}
+                elif params.pathway_id:
+                    # Get specific pathway details
+                    pathway_details = await self.reactome.get_pathway_details(params.pathway_id)
+                    results["pathway_details"] = pathway_details
+                    
+                    if params.include_hierarchy:
+                        hierarchy = await self.reactome.get_pathway_hierarchy(params.pathway_id)
+                        results["pathway_hierarchy"] = hierarchy
 
-            return results
-            
-        except Exception as e:
-            logger.error(f"Pathway analysis error: {str(e)}", exc_info=True)
-            return {"error": f"Pathway analysis failed: {str(e)}"}
+                elif params.disease_id:
+                    # Get disease-related events
+                    disease_events = await self.reactome.get_disease_events(params.disease_id)
+                    results["disease_events"] = disease_events
+
+                return results
+
+            except Exception as e:
+                logger.error(f"Pathway analysis error: {str(e)}")
+                return {"error": f"Pathway analysis failed: {str(e)}"}
+        
 
     async def _execute_molecular_mechanisms(self, arguments: Dict) -> Dict:
         """Execute molecular mechanism analysis"""
