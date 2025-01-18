@@ -124,30 +124,28 @@ class ProteinInteractionParams(BaseModel):
 
 class PathwayAnalysisParams(BaseModel):
     """Parameters for pathway analysis"""
-    genes: List[str] = Field(
-        description="List of gene identifiers"
-    )
-    pathway_types: List[str] = Field(
-        default_factory=list,
-        description="Types of pathways to include"
-    )
-    species: str = Field(
-        default="homo_sapiens",
-        description="Species to analyze"
-    )
-    include_child_pathways: bool = Field(
-        default=True,
-        description="Include child pathways"
-    )
+    gene_id: Optional[str] = Field(None, description="Gene/protein identifier (UniProt ID)")
+    pathway_id: Optional[str] = Field(None, description="Reactome pathway ID")
+    disease_id: Optional[str] = Field(None, description="Disease identifier")
+    include_hierarchy: bool = Field(default=False, description="Include pathway hierarchy")
+    include_participants: bool = Field(default=True, description="Include pathway participants")
 
     @model_validator(mode='before')
     @classmethod
-    def validate_genes(cls, values):
-        """Ensure at least one gene is provided"""
-        genes = values.get('genes', [])
-        if not genes:
-            raise ValueError("At least one gene must be provided")
+    def validate_inputs(cls, values):
+        """Ensure at least one identifier is provided"""
+        if not any([values.get('gene_id'), values.get('pathway_id'), values.get('disease_id')]):
+            raise ValueError("At least one of gene_id, pathway_id, or disease_id must be provided")
         return values
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "gene_id": "P38398",
+                "include_hierarchy": True,
+                "include_participants": True
+            }
+        }
 
 class GeneticVariantParams(BaseModel):
     """Parameters for genetic variant analysis"""
@@ -218,7 +216,7 @@ class DiseaseAnalysisParams(BaseModel):
         ge=0.0,
         le=1.0
     )
-    
+
 # OpenAI tool definitions
 BIOCHAT_TOOLS = [
     {
