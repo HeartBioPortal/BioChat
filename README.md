@@ -2,16 +2,82 @@
 
 BioChat is an intelligent conversational interface for biological databases that combines the power of large language models with specialized biological data sources. It enables researchers and professionals to interact with multiple biological databases using natural language queries.
 
-## Features
 
-BioChat provides seamless access to multiple biological databases through a unified interface:
+## Supported Databases and APIs
 
-- NCBI PubMed literature search and analysis
-- Ensembl genetic variant information
-- GWAS Catalog for genetic associations
-- UniProt protein information
-- Natural language understanding of biological queries
-- Comprehensive result synthesis and explanation
+BioChat integrates with multiple biological databases to provide comprehensive analysis capabilities:
+
+### Core Databases
+- **NCBI PubMed (E-utilities)**
+  - Literature search and analysis
+  - Citation information
+  - Article abstracts
+
+- **Open Targets Platform**
+  - Target-disease associations
+  - Drug information
+  - Clinical trials data
+  - Safety information
+  - Expression data
+
+- **Reactome**
+  - Biological pathways
+  - Molecular mechanisms
+  - Disease pathways
+
+- **Ensembl**
+  - Genetic variants
+  - Genomic annotations
+  - Gene information
+
+### Molecular Interactions and Networks
+- **STRING-DB**
+  - Protein-protein interactions
+  - Interaction networks
+  - Functional associations
+
+- **IntAct**
+  - Molecular interaction data
+  - Experimentally verified interactions
+  - Interaction networks
+
+- **BioGRID**
+  - Protein-protein interactions
+  - Genetic interactions
+  - Chemical associations
+
+### Disease and Drug Resources
+- **GWAS Catalog**
+  - Genetic associations
+  - Trait information
+  - Study metadata
+
+- **PharmGKB**
+  - Drug-gene relationships
+  - Clinical annotations
+  - Pharmacogenomic data
+
+### Protein and Pathway Information
+- **UniProt**
+  - Protein sequences
+  - Protein structure
+  - Function annotations
+
+- **BioCyc**
+  - Metabolic pathways
+  - Biochemical reactions
+  - Regulatory networks
+
+### Integration Features
+Each database provides specific capabilities:
+- Literature mining and evidence synthesis (PubMed)
+- Drug-target interactions and clinical relevance (Open Targets, PharmGKB)
+- Molecular interaction networks (STRING-DB, IntAct, BioGRID)
+- Pathway analysis and mechanisms (Reactome, BioCyc)
+- Genetic variation and genomic features (Ensembl)
+- Disease associations and pharmacogenomics (GWAS Catalog, PharmGKB)
+- Protein information and annotations (UniProt)
+
 
 
 ## Process FlowChart
@@ -22,24 +88,48 @@ BioChat provides seamless access to multiple biological databases through a unif
 
 ```
 biochat/
-├── src/
-│   ├── __init__.py
-│   ├── APIHub.py          # Biological database API integrations
-│   ├── schemas.py         # Data models and function definitions
-│   ├── tool_executor.py   # Database interaction logic
-│   ├── orchestrator.py    # Main orchestration logic
-│   └── api.py            # FastAPI application
-├── tests/                # Test files
-│   ├── __init__.py
-│   ├── test_api.py
-│   ├── test_orchestrator.py
-│   └── test_tool_executor.py
-├── docs/                 # Documentation files
-├── .env                 # Environment variables
-├── .gitignore          # Git ignore file
-├── requirements.txt    # Project dependencies
-├── LICENSE            # License file
-└── README.md         # Project documentation
+
+├── LICENSE
+├── README.md
+├── commitss.sh
+├── config.py
+├── htmlcov
+│   ├── status.json
+│   └── style_cb_8e611ae1.css
+├── requirements.txt
+├── run_tests.sh
+├── setup.py
+├── src
+│   ├── APIHub.py
+│   ├── __init__.py
+│   ├── __pycache__
+│   ├── api.py
+│   ├── orchestrator.py
+│   ├── schemas.py
+│   └── tool_executor.py
+└── tests
+    ├── __init__.py
+    ├── __pycache__
+    ├── conftest.py
+    ├── integration
+    │   ├── __init__.py
+    │   ├── __pycache__
+    │   ├── conftest.py
+    │   ├── test_gwas.py
+    │   ├── test_literature.py
+    │   ├── test_protein.py
+    │   └── test_variants.py
+    ├── logs
+    ├── pytest.ini
+    ├── test_api.py
+    ├── test_logger.py
+    ├── test_orchestrator.py
+    ├── test_requirements.txt
+    ├── test_tool_executor.py
+    └── utils
+        ├── __init__.py
+        ├── __pycache__
+        └── logger.py
 ```
 
 ## Prerequisites
