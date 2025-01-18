@@ -195,6 +195,30 @@ class MolecularMechanismParams(BaseModel):
             }
         }
 
+class TargetAnalysisParams(BaseModel):
+    """Parameters for target analysis using Open Targets"""
+    target_id: str = Field(description="Ensembl ID of the target")
+    include_safety: bool = Field(default=True, description="Include safety information")
+    include_drugs: bool = Field(default=True, description="Include known drugs")
+    include_expression: bool = Field(default=True, description="Include expression data")
+    min_association_score: float = Field(
+        default=0.1, 
+        description="Minimum association score for disease associations",
+        ge=0.0,
+        le=1.0
+    )
+
+class DiseaseAnalysisParams(BaseModel):
+    """Parameters for disease analysis using Open Targets"""
+    disease_id: str = Field(description="EFO ID of the disease")
+    include_targets: bool = Field(default=True, description="Include associated targets")
+    min_association_score: float = Field(
+        default=0.1,
+        description="Minimum association score for target associations",
+        ge=0.0,
+        le=1.0
+    )
+    
 # OpenAI tool definitions
 BIOCHAT_TOOLS = [
     {
@@ -267,5 +291,24 @@ BIOCHAT_TOOLS = [
             "parameters": MolecularMechanismParams.model_json_schema(),
             "required": ["protein_id"]
         }
+    },
+        {
+        "type": "function",
+        "function": {
+            "name": "analyze_target",
+            "description": "Analyze a target (gene/protein) using Open Targets Platform, including safety, drugs, and disease associations.",
+            "parameters": TargetAnalysisParams.model_json_schema(),
+            "required": ["target_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_disease",
+            "description": "Analyze a disease using Open Targets Platform, including associated targets and therapeutic approaches.",
+            "parameters": DiseaseAnalysisParams.model_json_schema(),
+            "required": ["disease_id"]
+        }
     }
+
 ]
