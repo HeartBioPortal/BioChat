@@ -5,11 +5,11 @@ import logging
 from src.APIHub import (
     NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI,
     StringDBClient, ReactomeClient, PharmGKBClient,
-    IntActClient, BioCyc, BioGridClient
+    IntActClient, BioCyc, BioGridClient, OpenTargetsClient
 )
 from src.schemas import (
     LiteratureSearchParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams,
-    ProteinInteractionParams, PathwayAnalysisParams, MolecularMechanismParams, GeneticVariantParams
+    ProteinInteractionParams, PathwayAnalysisParams, MolecularMechanismParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams
 )
 
 # Configure logger
@@ -37,7 +37,8 @@ class ToolExecutor:
             self.pharmgkb = PharmGKBClient()
             self.biocyc = BioCyc()
             self.biogrid = BioGridClient(access_key=biogrid_access_key) if biogrid_access_key else None
-            
+            self.open_targets = OpenTargetsClient()
+
             logger.info("Tool executor initialized successfully")
             
         except Exception as e:
@@ -61,7 +62,9 @@ class ToolExecutor:
                 "analyze_protein_interactions": self._execute_protein_interactions,
                 "analyze_pathways": self._execute_pathway_analysis,
                 "analyze_molecular_mechanisms": self._execute_molecular_mechanisms,
-                "analyze_genetic_variants": self._execute_genetic_variant_analysis
+                "analyze_genetic_variants": self._execute_genetic_variant_analysis,
+                "analyze_target": self._execute_target_analysis,
+                "analyze_disease": self._execute_disease_analysis
             }
             
             handler = handlers.get(function_name)
@@ -289,3 +292,58 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Genetic variant analysis error: {str(e)}", exc_info=True)
             return {"error": f"Variant analysis failed: {str(e)}"}
+
+
+    async def _execute_target_analysis(self, arguments: Dict) -> Dict:
+            """Execute comprehensive target analysis using Open Targets"""
+            params = TargetAnalysisParams(**arguments)
+            try:
+                # Get basic target information
+                target_info = await self.open_targets.get_target_info(params.target_id)
+                
+                results = {
+                    "target_info": target_info,
+                    "associations": await self.open_targets.get_target_disease_associations(
+                        target_id=params.target_id,
+                        score_min=params.min_association_score
+                    )
+                }
+                
+                # Add optional information
+                if params.include_safety:
+                    results["safety"] = await self.open_targets.get_target_safety(params.target_id)
+                    
+                if params.include_drugs:
+                    results["drugs"] = await self.open_targets.get_known_drugs(params.target_id)
+                    
+                if params.include_expression:
+                    results["expression"] = await self.open_targets.get_target_expression(params.target_id)
+                
+                return results
+                
+            except Exception as e:
+                logger.error(f"Target analysis error: {e}")
+                return {"error": f"Target analysis failed: {str(e)}"}
+
+    async def _execute_disease_analysis(self, arguments: Dict) -> Dict:
+        """Execute comprehensive disease analysis using Open Targets"""
+        params = DiseaseAnalysisParams(**arguments)
+        try:
+            # Get basic disease information
+            disease_info = await self.open_targets.get_disease_info(params.disease_id)
+            
+            results = {
+                "disease_info": disease_info
+            }
+            
+            if params.include_targets:
+                results["target_associations"] = await self.open_targets.get_target_disease_associations(
+                    disease_id=params.disease_id,
+                    score_min=params.min_association_score
+                )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Disease analysis error: {e}")
+            return {"error": f"Disease analysis failed: {str(e)}"}
