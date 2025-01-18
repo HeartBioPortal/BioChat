@@ -789,22 +789,3 @@ class OpenTargetsClient:
         """Get expression data for a target"""
         response = await self._make_request(f"target/{target_id}/expression")
         return response
-
-    async def _make_request(
-        self, 
-        endpoint: str, 
-        method: str = "GET",
-        params: Dict = None,
-        json: Dict = None
-    ) -> Dict:
-        """Make HTTP request to Open Targets API"""
-        url = f"{self.base_url}/{endpoint}"
-        
-        async with httpx.AsyncClient() as client:
-            if method == "GET":
-                response = await client.get(url, params=params, headers=self.headers)
-            else:  # POST
-                response = await client.post(url, params=params, json=json, headers=self.headers)
-            
-            response.raise_for_status()
-            return response.json()
