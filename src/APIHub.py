@@ -611,6 +611,21 @@ class BioCyc(BioDatabaseAPI):
         }
         return await self._make_request("getSearch", params)
 
+    async def get_pathways(self, genes: List[str], include_children: bool = True) -> Dict:
+        """Get pathway data for genes."""
+        results = {}
+        for gene in genes:
+            try:
+                gene_results = {
+                    "pathways": await self.get_metabolic_pathways(gene),
+                    "regulation": await self.get_gene_regulation(gene)
+                }
+                results[gene] = gene_results
+            except Exception as e:
+                logger.error(f"Error getting BioCyc data for {gene}: {str(e)}")
+                results[gene] = {"error": str(e)}
+        return results
+
     async def get_metabolic_pathways(self, gene: str) -> Dict:
         """Get metabolic pathways for a gene."""
         params = {"gene": gene, "organism": "HUMAN"}
@@ -712,3 +727,87 @@ class UniProtAPI(BioDatabaseAPI):
         except Exception as e:
             logger.error(f"Protein features error: {str(e)}")
             return {"error": str(e)}
+
+
+class OpenTargetsClient:
+    """Client for interacting with Open Targets Platform API"""
+    
+    def __init__(self):
+        self.base_url = "https://platform.opentargets.org/api/public"
+        self.headers = {"Content-Type": "application/json"}
+
+    async def search(self, query: str, entity: str = None, size: int = 10) -> Dict:
+        """Search across targets, diseases, and drugs"""
+        params = {
+            "q": query,
+            "size": size
+        }
+        if entity:
+            params["entity"] = entity
+            
+        response = await self._make_request("search", params=params)
+        return response
+
+    async def get_target_info(self, target_id: str) -> Dict:
+        """Get detailed information about a target"""
+        response = await self._make_request(f"target/{target_id}")
+        return response
+
+    async def get_disease_info(self, disease_id: str) -> Dict:
+        """Get detailed information about a disease"""
+        response = await self._make_request(f"disease/{disease_id}")
+        return response
+
+    async def get_target_disease_associations(self, 
+        target_id: str = None,
+        disease_id: str = None,
+        score_min: float = 0.0,
+        size: int = 10
+    ) -> Dict:
+        """Get associations between targets and diseases"""
+        payload = {
+            "scorevalue_min": score_min,
+            "size": size
+        }
+        if target_id:
+            payload["target"] = target_id
+        if disease_id:
+            payload["disease"] = disease_id
+
+        response = await self._make_request("association/filter", method="POST", json=payload)
+        return response
+
+    async def get_target_safety(self, target_id: str) -> Dict:
+        """Get safety information for a target"""
+        response = await self._make_request(f"target/{target_id}/safety")
+        return response
+
+    async def get_known_drugs(self, target_id: str, size: int = 10) -> Dict:
+        """Get known drugs for a target"""
+        params = {"size": size}
+        response = await self._make_request(f"target/{target_id}/known_drugs", params=params)
+        return response
+
+    async def get_target_expression(self, target_id: str) -> Dict:
+        """Get expression data for a target"""
+        response = await self._make_request(f"target/{target_id}/expression")
+        return response
+
+    async def _make_request(
+        self, 
+        endpoint: str, 
+        method: str = "GET",
+        params: Dict = None,
+        json: Dict = None
+    ) -> Dict:
+        """Make HTTP request to Open Targets API"""
+        url = f"{self.base_url}/{endpoint}"
+        
+        async with httpx.AsyncClient() as client:
+            if method == "GET":
+                response = await client.get(url, params=params, headers=self.headers)
+            else:  # POST
+                response = await client.post(url, params=params, json=json, headers=self.headers)
+            
+            response.raise_for_status()
+            return response.json()
