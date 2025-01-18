@@ -7,6 +7,11 @@ BioChat is an intelligent conversational interface for biological databases that
 
 BioChat integrates with multiple biological databases to provide comprehensive analysis capabilities:
 
+## Process FlowChart
+
+![image (4)](https://github.com/user-attachments/assets/0e8681a7-df04-44e0-8ede-fd6354eb080d)
+
+
 ### Core Databases
 - **NCBI PubMed (E-utilities)**
   - Literature search and analysis
@@ -79,10 +84,6 @@ Each database provides specific capabilities:
 - Protein information and annotations (UniProt)
 
 
-
-## Process FlowChart
-
-![image (4)](https://github.com/user-attachments/assets/0e8681a7-df04-44e0-8ede-fd6354eb080d)
 
 ## Project Structure
 
