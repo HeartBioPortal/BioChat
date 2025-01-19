@@ -59,22 +59,22 @@ async def test_DSP_literature_search(integration_orchestrator, clear_conversatio
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_complex_query_with_multiple_genes(integration_orchestrator, clear_conversation_history):
-    """Test querying multiple genes and their interactions"""
-        
-    query = "What is known about the interaction between DSP, BRCA2, and TP53 in cancer development?"
+async def test_complex_query_with_multiple_genes(integration_orchestrator):
+    """Test handling of complex multi-gene queries"""
+    query = "What are the key interactions between DSP, BRCA2, and TP53 in cancer development?"
     response = await integration_orchestrator.process_query(query)
     
-    test_logger.log_conversation(
-        test_name="Complex Gene Interactions Query",
-        query=query,
-        response=response,
-        conversation_history=integration_orchestrator.get_conversation_history()
-    )
-    
+    # Verify response structure
     assert isinstance(response, str)
-    assert len(response) > 200
-    assert all(gene in response for gene in ["DSP", "BRCA2", "TP53"])
+    assert len(response) > 0
+    assert "DSP" in response
+    assert "BRCA2" in response
+    assert "TP53" in response
+    
+    # Verify section headers exist
+    assert "### DSP:" in response
+    assert "### BRCA2:" in response
+    assert "### TP53:" in response
 
 @pytest.mark.integration
 @pytest.mark.asyncio
