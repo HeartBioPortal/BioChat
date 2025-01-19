@@ -13,6 +13,8 @@ import aiohttp
 import asyncio
 import logging
 import ssl
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +42,17 @@ class BioDatabaseAPI(ABC):
     async def _init_session(self):
         """Initialize aiohttp session if not exists"""
         if self.session is None or self.session.closed:
-            # Create SSL context that doesn't verify certificates
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            
-            conn = aiohttp.TCPConnector(ssl=ssl_context)
-            self.session = aiohttp.ClientSession(connector=conn)
+            # Create connection with proper timeouts
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            conn = aiohttp.TCPConnector(
+                ssl=False,  # Disable SSL verification for testing
+                limit=10,   # Limit concurrent connections
+                force_close=True  # Force connection closure
+            )
+            self.session = aiohttp.ClientSession(
+                connector=conn,
+                timeout=timeout
+            )
 
     async def _close_session(self):
         """Close aiohttp session if exists"""
@@ -55,27 +61,41 @@ class BioDatabaseAPI(ABC):
             self.session = None
     
     async def _make_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> Dict:
-        """
-        Helper method to make async HTTP requests with rate limiting.
-        Args:
-            endpoint: API endpoint
-            params: Query parameters
-            delay: Time to wait between requests (default: 0.34s for NCBI compliance)
-        """
-        await self._init_session()
-        await asyncio.sleep(delay)
+        """Enhanced request method with better error handling"""
+        max_retries = 3
+        retry_delay = 1
         
-        url = f"{self.base_url}/{endpoint}"
-        try:
-            async with self.session.get(url, headers=self.headers, params=params) as response:
-                response.raise_for_status()
-                return await response.json()
-        except aiohttp.ClientError as e:
-            logger.error(f"API request error: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error in API request: {str(e)}")
-            raise
+        for attempt in range(max_retries):
+            try:
+                await self._init_session()
+                await asyncio.sleep(delay)
+                
+                url = f"{self.base_url}/{endpoint}"
+                async with self.session.get(url, headers=self.headers, params=params) as response:
+                    if response.status == 429:  # Rate limit
+                        retry_after = int(response.headers.get('Retry-After', retry_delay))
+                        await asyncio.sleep(retry_after)
+                        continue
+                        
+                    response.raise_for_status()
+                    return await response.json()
+                    
+            except aiohttp.ClientError as e:
+                logger.error(f"API request error: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(retry_delay * (attempt + 1))
+                
+            except Exception as e:
+                logger.error(f"Unexpected error in API request: {str(e)}")
+                raise
+
+    async def __aenter__(self):
+        await self._init_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._close_session()
     
     @abstractmethod
     async def search(self, query: str) -> Dict:
@@ -96,14 +116,6 @@ class BioDatabaseAPI(ABC):
             logger.error(f"Raw request error: {str(e)}")
             raise
 
-    async def __aenter__(self):
-        """Async context manager enter"""
-        await self._init_session()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        await self._close_session()
 
 class NCBIEutils(BioDatabaseAPI):
     """Enhanced NCBI E-utilities API client with advanced PubMed search capabilities."""
