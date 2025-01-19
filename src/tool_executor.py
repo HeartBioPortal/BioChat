@@ -195,26 +195,46 @@ class ToolExecutor:
             return {"error": f"Interaction analysis failed: {str(e)}"}
 
     async def _execute_pathway_analysis(self, arguments: Dict) -> Dict:
-            """Execute pathway analysis using Reactome"""
+        """Execute pathway analysis using Reactome"""
+        try:
             params = PathwayAnalysisParams(**arguments)
-            try:
-                results = {}
-                
-                if params.gene_id:
+            results = {}
+            
+            # Handle list of genes
+            if params.genes:
+                for gene in params.genes:
                     # Get pathways for gene
-                    pathways = await self.reactome.get_pathways_for_gene(params.gene_id)
-                    results["gene_pathways"] = pathways
-                    
-                    # Get details for each pathway if requested
-                    if params.include_participants and "pathways" in pathways:
-                        pathway_details = []
-                        for pathway in pathways["pathways"][:5]:  # Limit to top 5 pathways
-                            details = await self.reactome.get_pathway_details(pathway["stId"])
-                            if params.include_hierarchy:
-                                hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
-                                details["hierarchy"] = hierarchy
-                            pathway_details.append(details)
-                        results["pathway_details"] = pathway_details
+                    pathways = await self.reactome.get_pathways_for_gene(gene)
+                    if pathways:
+                        results[gene] = {
+                            "pathways": pathways
+                        }
+                        
+                        # Get additional details if requested
+                        if params.include_participants and "pathways" in pathways:
+                            pathway_details = []
+                            for pathway in pathways["pathways"][:5]:  # Limit to top 5
+                                details = await self.reactome.get_pathway_details(pathway["stId"])
+                                if params.include_hierarchy:
+                                    hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
+                                    details["hierarchy"] = hierarchy
+                                pathway_details.append(details)
+                            results[gene]["pathway_details"] = pathway_details
+                            
+            # Handle single gene_id (for backward compatibility)
+            elif params.gene_id:
+                pathways = await self.reactome.get_pathways_for_gene(params.gene_id)
+                results["gene_pathways"] = pathways
+                
+                if params.include_participants and "pathways" in pathways:
+                    pathway_details = []
+                    for pathway in pathways["pathways"][:5]:
+                        details = await self.reactome.get_pathway_details(pathway["stId"])
+                        if params.include_hierarchy:
+                            hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
+                            details["hierarchy"] = hierarchy
+                        pathway_details.append(details)
+                    results["pathway_details"] = pathway_details
 
                 elif params.pathway_id:
                     # Get specific pathway details
@@ -232,9 +252,9 @@ class ToolExecutor:
 
                 return results
 
-            except Exception as e:
-                logger.error(f"Pathway analysis error: {str(e)}")
-                return {"error": f"Pathway analysis failed: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Pathway analysis error: {str(e)}")
+            return {"error": f"Pathway analysis failed: {str(e)}"}
         
 
     async def _execute_molecular_mechanisms(self, arguments: Dict) -> Dict:
@@ -242,9 +262,12 @@ class ToolExecutor:
         try:
             params = MolecularMechanismParams(**arguments)
             protein_info = await self._execute_protein_info({"protein_id": params.protein_id})
+            
+            # Update pathway analysis call to use genes list
             pathway_data = await self._execute_pathway_analysis({
-                "genes": [params.protein_id],
-                "pathway_types": params.mechanism_types
+                "genes": [params.protein_id],  # Pass as list of genes
+                "include_hierarchy": True,
+                "include_participants": params.include_pathways
             }) if params.include_pathways else {}
 
             results = {
@@ -260,7 +283,7 @@ class ToolExecutor:
             return results
             
         except Exception as e:
-            logger.error(f"Molecular mechanism analysis error: {str(e)}", exc_info=True)
+            logger.error(f"Molecular mechanism analysis error: {str(e)}")
             return {"error": f"Mechanism analysis failed: {str(e)}"}
 
     async def _execute_genetic_variant_analysis(self, arguments: Dict) -> Dict:
