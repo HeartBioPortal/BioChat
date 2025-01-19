@@ -30,25 +30,31 @@ class BioChatOrchestrator:
     async def process_query(self, user_query: str) -> str:
         """Process a user query through the ChatGPT model and execute necessary database queries"""
         try:
-            # Add user query to conversation history
+            # Break down complex queries if needed
+            if self._is_complex_gene_query(user_query):
+                return await self._handle_complex_gene_query(user_query)
+                
+            # Original process_query logic for simple queries...
             self.conversation_history.append({"role": "user", "content": user_query})
             
-            # Build message list from conversation history
             messages = [
                 {"role": "system", "content": self._create_system_message()},
-                *self.conversation_history  # Include full conversation history
+                *self.conversation_history
             ]
 
-            # Get initial response from ChatGPT
-            initial_completion = await self.client.chat.completions.create(
-                model="gpt-4-0125-preview",  # Fixed model name
-                messages=messages,
-                tools=BIOCHAT_TOOLS,
-                tool_choice="auto"
-            )
+            try:
+                initial_completion = await self.client.chat.completions.create(
+                    model="gpt-4-0125-preview",
+                    messages=messages,
+                    tools=BIOCHAT_TOOLS,
+                    tool_choice="auto",
+                    max_tokens=4096  # Add token limit
+                )
 
-            initial_message = initial_completion.choices[0].message
-            
+                initial_message = initial_completion.choices[0].message
+            except:
+                raise
+
             # Handle tool calls if present
             if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
                 # Add assistant's message with tool calls to conversation history
@@ -112,6 +118,58 @@ class BioChatOrchestrator:
             error_message = f"An error occurred: {str(e)}"
             self.conversation_history.append({"role": "assistant", "content": error_message})
             return error_message
+    
+    def _is_complex_gene_query(self, query: str) -> bool:
+            """Check if query involves multiple genes"""
+            # Simple heuristic - count gene symbols
+            common_genes = ["BRCA1", "BRCA2", "TP53", "DSP", "PCSK9"]
+            mentioned_genes = [gene for gene in common_genes if gene in query]
+            return len(mentioned_genes) > 2
+
+    async def _handle_complex_gene_query(self, query: str) -> str:
+        """Handle queries involving multiple genes by breaking them down"""
+        common_genes = ["BRCA1", "BRCA2", "TP53", "DSP", "PCSK9"]
+        mentioned_genes = [gene for gene in common_genes if gene in query]
+        
+        responses = []
+        for gene in mentioned_genes:
+            # Process each gene separately
+            sub_query = f"What is known about {gene} in the context of {query}?"
+            response = await self.process_single_gene_query(sub_query)
+            responses.append(response)
+            
+        # Synthesize responses
+        combined = "Analysis of multiple genes:\n\n"
+        for gene, response in zip(mentioned_genes, responses):
+            combined += f"\n### {gene}:\n{response}\n"
+            
+        return combined
+
+    async def process_single_gene_query(self, query: str) -> str:
+        """Process a query about a single gene"""
+        # Similar to process_query but with stricter token limits
+        try:
+            self.conversation_history.append({"role": "user", "content": query})
+            
+            messages = [
+                {"role": "system", "content": self._create_system_message()},
+                *self.conversation_history[-2:]  # Only keep recent context
+            ]
+
+            completion = await self.client.chat.completions.create(
+                model="gpt-4-0125-preview",
+                messages=messages,
+                tools=BIOCHAT_TOOLS,
+                tool_choice="auto",
+                max_tokens=2048  # Smaller token limit for sub-queries
+            )
+            
+            return completion.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"Error in single gene query: {str(e)}")
+            return f"Error processing query for gene: {str(e)}"
+    
 
     def _create_system_message(self) -> str:
         """Create the system message that guides the model's behavior"""
