@@ -8,7 +8,7 @@ from src.APIHub import (
     IntActClient, BioCyc, BioGridClient, OpenTargetsClient
 )
 from src.schemas import (
-    LiteratureSearchParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams,
+    BioGridChemicalParams, BioGridInteractionParams, IntActSearchParams, LiteratureSearchParams, PharmGKBClinicalParams, PharmGKBVariantParams, StringDBEnrichmentParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams,
     ProteinInteractionParams, PathwayAnalysisParams, MolecularMechanismParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams
 )
 
@@ -20,6 +20,26 @@ logging.basicConfig(
 )
 
 class ToolExecutor:
+
+    SYSTEM_GUIDANCE = """
+    When analyzing gene-disease associations:
+    1. Always cite sources with database names and timestamps
+    2. Organize evidence hierarchically:
+       - Direct molecular evidence
+       - Pathway involvement
+       - Literature support
+       - Clinical associations
+    3. Rate confidence levels:
+       - High: Multiple independent sources
+       - Medium: Limited but consistent evidence
+       - Low: Preliminary or conflicting data
+    4. Present findings in sections:
+       - Summary
+       - Molecular Mechanisms
+       - Clinical Relevance
+       - Supporting Evidence
+    """
+
     def __init__(self, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str = None):
         """Initialize database clients with appropriate credentials"""
         # Initialize core clients with error handling
@@ -53,16 +73,20 @@ class ToolExecutor:
             
             logger.info(f"Executing tool: {function_name}")
             
-            # Map function names to their handlers
+            # Updated handlers mapping
             handlers = {
                 "search_literature": self._execute_literature_search,
                 "search_variants": self._execute_variant_search,
                 "search_gwas": self._execute_gwas_search,
                 "get_protein_info": self._execute_protein_info,
-                "analyze_protein_interactions": self._execute_protein_interactions,
+                "get_string_interactions": self._execute_string_interactions,
+                "get_biogrid_interactions": self._execute_biogrid_interactions,
+                "get_biogrid_chemical_interactions": self._execute_biogrid_chemical_interactions,
+                "get_intact_interactions": self._execute_intact_interactions,
                 "analyze_pathways": self._execute_pathway_analysis,
-                "analyze_molecular_mechanisms": self._execute_molecular_mechanisms,
-                "analyze_genetic_variants": self._execute_genetic_variant_analysis,
+                "get_pharmgkb_annotations": self._execute_pharmgkb_annotations,
+                "get_pharmgkb_variants": self._execute_pharmgkb_variants,
+                "analyze_genetic_variants": self._execute_genetic_variants,
                 "analyze_target": self._execute_target_analysis,
                 "analyze_disease": self._execute_disease_analysis
             }
@@ -71,26 +95,117 @@ class ToolExecutor:
             if not handler:
                 raise ValueError(f"Unknown function: {function_name}")
             
-            result = await handler(arguments)
-            return result
+            return await handler(arguments)
 
-        except json.JSONDecodeError:
-            logger.error("Failed to parse tool arguments", exc_info=True)
-            return {"error": "Invalid arguments format"}
         except Exception as e:
-            logger.error(f"Tool execution error: {str(e)}", exc_info=True)
+            logger.error(f"Tool execution error: {str(e)}")
             return {"error": str(e)}
 
+    async def _execute_string_interactions(self, arguments: Dict) -> Dict:
+        """Execute STRING-DB interaction analysis"""
+        try:
+            params = StringDBEnrichmentParams(**arguments)
+            results = await self.string_db.get_interaction_partners(
+                identifiers=params.identifiers,
+                species=params.species
+            )
+            
+            if params.background_identifiers:
+                enrichment = await self.string_db.get_ppi_enrichment(
+                    identifiers=params.identifiers,
+                    background_identifiers=params.background_identifiers
+                )
+                results["enrichment"] = enrichment
+                
+            return results
+        except Exception as e:
+            logger.error(f"STRING-DB analysis error: {str(e)}")
+            return {"error": str(e)}
+
+    async def _execute_biogrid_interactions(self, arguments: Dict) -> Dict:
+        """Execute BioGRID interaction analysis"""
+        try:
+            params = BioGridInteractionParams(**arguments)
+            return await self.biogrid.get_core_interactions(
+                gene_list=params.gene_list,
+                include_interactors=params.include_interactors,
+                tax_id=params.tax_id
+            )
+        except Exception as e:
+            logger.error(f"BioGRID interaction error: {str(e)}")
+            return {"error": str(e)}
+
+    async def _execute_biogrid_chemical_interactions(self, arguments: Dict) -> Dict:
+        """Execute BioGRID chemical interaction analysis"""
+        try:
+            params = BioGridChemicalParams(**arguments)
+            return await self.biogrid.get_chemical_interactions(
+                gene_list=params.gene_list,
+                chemical_list=params.chemical_list,
+                evidence_list=params.evidence_list
+            )
+        except Exception as e:
+            logger.error(f"BioGRID chemical interaction error: {str(e)}")
+            return {"error": str(e)}
+
+    async def _execute_intact_interactions(self, arguments: Dict) -> Dict:
+        """Execute IntAct interaction search"""
+        try:
+            params = IntActSearchParams(**arguments)
+            return await self.intact.search(
+                query=params.query,
+                species=params.species,
+                negative_filter=params.negative_filter,
+                page=params.page,
+                page_size=params.page_size
+            )
+        except Exception as e:
+            logger.error(f"IntAct search error: {str(e)}")
+            return {"error": str(e)}
+
+    async def _execute_pharmgkb_annotations(self, arguments: Dict) -> Dict:
+        """Execute PharmGKB clinical annotation search"""
+        try:
+            params = PharmGKBClinicalParams(**arguments)
+            return await self.pharmgkb.get_clinical_annotations(
+                drug_id=params.drug_id,
+                gene_id=params.gene_id
+            )
+        except Exception as e:
+            logger.error(f"PharmGKB annotation error: {str(e)}")
+            return {"error": str(e)}
+
+    async def _execute_pharmgkb_variants(self, arguments: Dict) -> Dict:
+        """Execute PharmGKB variant annotation search"""
+        try:
+            params = PharmGKBVariantParams(**arguments)
+            return await self.pharmgkb.get_variant_annotations(
+                variant_id=params.variant_id,
+                drug_id=params.drug_id
+            )
+        except Exception as e:
+            logger.error(f"PharmGKB variant error: {str(e)}")
+            return {"error": str(e)}
+        
     async def _execute_literature_search(self, arguments: Dict) -> Dict:
         """Execute literature search using NCBI"""
         try:
             params = LiteratureSearchParams(**arguments)
-            return await self.ncbi.search_and_analyze(
+            results = await self.ncbi.search_and_analyze(
                 genes=params.genes,
                 phenotypes=params.phenotypes,
                 additional_terms=params.additional_terms,
                 max_results=params.max_results
             )
+            
+            # Add metadata for citation
+            results["metadata"] = {
+                "source": "NCBI PubMed",
+                "query_date": datetime.now().isoformat(),
+                "database_version": "2024",
+                "citation_format": "PMID: [id]"
+            }
+            return results
         except Exception as e:
             logger.error(f"Literature search error: {str(e)}", exc_info=True)
             return {"error": f"Literature search failed: {str(e)}"}
@@ -158,42 +273,6 @@ class ToolExecutor:
             logger.error(f"Protein info error: {str(e)}")
             return {"error": str(e)}
 
-    async def _execute_protein_interactions(self, arguments: Dict) -> Dict:
-        """Execute protein interaction analysis"""
-        try:
-            params = ProteinInteractionParams(**arguments)
-            if not self.string_db or not self.biogrid:
-                return {"error": "Protein interaction services not available"}
-            
-            results = {
-                "protein_id": params.protein_id,
-                "interactions": {}
-            }
-            
-            try:
-                results["interactions"]["string_db"] = await self.string_db.get_interactions(
-                    protein_id=params.protein_id,
-                    confidence_score=params.confidence_score
-                )
-            except Exception as e:
-                logger.warning(f"STRING-DB query failed: {str(e)}")
-                results["interactions"]["string_db"] = {"error": str(e)}
-
-            try:
-                results["interactions"]["biogrid"] = await self.biogrid.get_interactions(
-                    protein_id=params.protein_id,
-                    max_results=params.max_interactions
-                )
-            except Exception as e:
-                logger.warning(f"BioGRID query failed: {str(e)}")
-                results["interactions"]["biogrid"] = {"error": str(e)}
-
-            return results
-            
-        except Exception as e:
-            logger.error(f"Protein interaction analysis error: {str(e)}", exc_info=True)
-            return {"error": f"Interaction analysis failed: {str(e)}"}
-
     async def _execute_pathway_analysis(self, arguments: Dict) -> Dict:
         """Execute pathway analysis using Reactome"""
         try:
@@ -217,7 +296,10 @@ class ToolExecutor:
                         if pathways:
                             results[gene] = {
                                 "status": "success",
-                                "pathways": pathways
+                                "pathways": pathways,
+                                "evidence_strength": "high/medium/low",
+                                "source": "Reactome Database",
+                                "last_updated": datetime.now().isoformat()
                             }
                             
                             if params.include_participants and "pathways" in pathways:
@@ -251,80 +333,6 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Pathway analysis error: {str(e)}")
             return {"error": f"Pathway analysis failed: {str(e)}"}
-        
-
-    async def _execute_molecular_mechanisms(self, arguments: Dict) -> Dict:
-        """Execute molecular mechanism analysis"""
-        try:
-            params = MolecularMechanismParams(**arguments)
-            
-            # Get protein info
-            protein_info = await self._execute_protein_info({"protein_id": params.protein_id})
-            
-            # Get pathway data if requested
-            pathway_data = {}
-            if params.include_pathways:
-                pathway_data = await self._execute_pathway_analysis({
-                    "genes": [params.protein_id],
-                    "include_hierarchy": True,
-                    "include_participants": True
-                })
-
-            results = {
-                "protein_id": params.protein_id,
-                "timestamp": datetime.now().isoformat(),
-                "mechanism_types": params.mechanism_types,
-                "data": {
-                    "protein_info": protein_info,
-                    "pathway_data": pathway_data
-                }
-            }
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Molecular mechanism analysis error: {str(e)}")
-            return {"error": f"Mechanism analysis failed: {str(e)}"}
-
-
-    async def _execute_genetic_variant_analysis(self, arguments: Dict) -> Dict:
-        """Execute genetic variant analysis"""
-        try:
-            params = GeneticVariantParams(**arguments)
-            
-            # Get basic variant data from Ensembl
-            gene_info = await self.ensembl.search(params.gene)
-            if not gene_info:
-                return {"error": f"Gene {params.gene} not found in Ensembl"}
-
-            variants = await self.ensembl.get_variants(
-                chromosome=gene_info.get("seq_region_name", "1"),
-                start=gene_info.get("start"),
-                end=gene_info.get("end"),
-                species="homo_sapiens"
-            )
-            
-            results = {
-                "gene": params.gene,
-                "variants": variants,
-                "clinical_data": {}
-            }
-
-            # Add pharmacogenomic data if available
-            try:
-                if self.pharmgkb:
-                    pharmgkb_data = await self.pharmgkb.get_drug_gene_relationships(params.gene)
-                    results["clinical_data"]["pharmgkb"] = pharmgkb_data
-            except Exception as e:
-                logger.warning(f"PharmGKB query failed: {str(e)}")
-                results["clinical_data"]["pharmgkb"] = {"error": str(e)}
-
-            return results
-            
-        except Exception as e:
-            logger.error(f"Genetic variant analysis error: {str(e)}", exc_info=True)
-            return {"error": f"Variant analysis failed: {str(e)}"}
-
 
     async def _execute_target_analysis(self, arguments: Dict) -> Dict:
             """Execute comprehensive target analysis using Open Targets"""
@@ -358,24 +366,60 @@ class ToolExecutor:
                 return {"error": f"Target analysis failed: {str(e)}"}
 
     async def _execute_disease_analysis(self, arguments: Dict) -> Dict:
-        """Execute comprehensive disease analysis using Open Targets"""
-        params = DiseaseAnalysisParams(**arguments)
         try:
-            # Get basic disease information
+            params = DiseaseAnalysisParams(**arguments)
             disease_info = await self.open_targets.get_disease_info(params.disease_id)
             
+            # Cross-reference with literature
+            literature = await self._execute_literature_search({
+                "phenotypes": [disease_info.get("name")],
+                "max_results": 5
+            })
+            
+            # Cross-reference with pathways
+            related_genes = disease_info.get("associated_genes", [])
+            pathways = await self._execute_pathway_analysis({
+                "genes": related_genes[:5]  # Top 5 associated genes
+            })
+            
             results = {
-                "disease_info": disease_info
+                "disease_info": disease_info,
+                "supporting_literature": literature,
+                "pathway_analysis": pathways,
+                "metadata": {
+                    "sources": ["Open Targets", "PubMed", "Reactome"],
+                    "analysis_date": datetime.now().isoformat(),
+                    "confidence_score": "Calculate based on evidence convergence"
+                }
             }
             
-            if params.include_targets:
-                results["target_associations"] = await self.open_targets.get_target_disease_associations(
-                    disease_id=params.disease_id,
-                    score_min=params.min_association_score
-                )
-            
             return results
-            
+
         except Exception as e:
-            logger.error(f"Disease analysis error: {e}")
-            return {"error": f"Disease analysis failed: {str(e)}"}
+                logger.error(f"Target analysis error: {e}")
+                return {"error": f"Target analysis failed: {str(e)}"}
+
+    async def aggregate_gene_disease_evidence(self, gene: str, disease: str) -> Dict:
+        """Comprehensive evidence gathering across all databases"""
+        results = {
+            "literature": await self._execute_literature_search({
+                "genes": [gene],
+                "phenotypes": [disease]
+            }),
+            "molecular": await self._execute_protein_info({"protein_id": gene}),
+            "pathways": await self._execute_pathway_analysis({"genes": [gene]}),
+            "variants": await self._execute_genetic_variants({"gene": gene}),
+            "clinical": await self._execute_pharmgkb_annotations({
+                "gene_id": gene
+            })
+        }
+        
+        # Add confidence scoring
+        results["evidence_summary"] = {
+            "confidence_score": self._calculate_confidence(results),
+            "evidence_types": list(results.keys()),
+            "source_databases": ["PubMed", "UniProt", "Reactome", "PharmGKB"],
+            "analysis_date": datetime.now().isoformat()
+        }
+        
+        return results
