@@ -376,6 +376,18 @@ class ReactomeClient(BioDatabaseAPI):
         self.base_url = "https://reactome.org/ContentService/data"
         self.headers = {"Content-Type": "application/json"}
 
+    async def get_uniprot_id(self, gene_symbol: str) -> str:
+        """Convert gene symbol to UniProt ID using UniProt API"""
+        uniprot = UniProtAPI()
+        try:
+            search_result = await uniprot.search(gene_symbol)
+            if 'results' in search_result and search_result['results']:
+                return search_result['results'][0].get('id')
+            return None
+        except Exception as e:
+            logger.error(f"Error converting gene symbol to UniProt ID: {str(e)}")
+            return None
+
     async def search(self, query: str) -> Dict:
         """Base search method implementation"""
         try:
@@ -394,9 +406,28 @@ class ReactomeClient(BioDatabaseAPI):
     async def get_pathways_for_gene(self, gene_id: str) -> Dict:
         """Get pathways involving a specific gene/protein"""
         try:
-            # Use entity/pathways endpoint with UniProt ID
+            # Convert gene symbol to UniProt ID if needed
+            if not gene_id.startswith('P') and not gene_id.startswith('Q'):
+                uniprot_id = await self.get_uniprot_id(gene_id)
+                if uniprot_id:
+                    gene_id = uniprot_id
+                else:
+                    logger.warning(f"Could not find UniProt ID for gene {gene_id}")
+                    return {"error": f"Could not find UniProt ID for gene {gene_id}"}
+
+            # Try first endpoint
             endpoint = f"entity/{gene_id}/pathways"
-            return await self._make_request(endpoint)
+            try:
+                return await self._make_request(endpoint)
+            except Exception as first_error:
+                # Try alternative endpoint if first one fails
+                try:
+                    endpoint = f"interactors/pathways/entity/{gene_id}"
+                    return await self._make_request(endpoint)
+                except Exception as second_error:
+                    logger.error(f"Both pathway endpoints failed for {gene_id}: {str(second_error)}")
+                    return {"error": str(second_error)}
+
         except Exception as e:
             logger.error(f"Error getting pathways for gene {gene_id}: {str(e)}")
             return {"error": str(e)}

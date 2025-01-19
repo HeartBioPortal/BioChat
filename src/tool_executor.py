@@ -200,57 +200,53 @@ class ToolExecutor:
             params = PathwayAnalysisParams(**arguments)
             results = {}
             
-            # Handle list of genes
             if params.genes:
                 for gene in params.genes:
-                    # Get pathways for gene
-                    pathways = await self.reactome.get_pathways_for_gene(gene)
-                    if pathways:
-                        results[gene] = {
-                            "pathways": pathways
-                        }
+                    try:
+                        # Get pathways for gene
+                        pathways = await self.reactome.get_pathways_for_gene(gene)
                         
-                        # Get additional details if requested
-                        if params.include_participants and "pathways" in pathways:
-                            pathway_details = []
-                            for pathway in pathways["pathways"][:5]:  # Limit to top 5
-                                details = await self.reactome.get_pathway_details(pathway["stId"])
-                                if params.include_hierarchy:
-                                    hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
-                                    details["hierarchy"] = hierarchy
-                                pathway_details.append(details)
-                            results[gene]["pathway_details"] = pathway_details
+                        if isinstance(pathways, dict) and "error" in pathways:
+                            logger.warning(f"Could not get pathways for gene {gene}: {pathways['error']}")
+                            results[gene] = {
+                                "status": "error",
+                                "message": pathways['error']
+                            }
+                            continue
                             
-            # Handle single gene_id (for backward compatibility)
-            elif params.gene_id:
-                pathways = await self.reactome.get_pathways_for_gene(params.gene_id)
-                results["gene_pathways"] = pathways
-                
-                if params.include_participants and "pathways" in pathways:
-                    pathway_details = []
-                    for pathway in pathways["pathways"][:5]:
-                        details = await self.reactome.get_pathway_details(pathway["stId"])
-                        if params.include_hierarchy:
-                            hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
-                            details["hierarchy"] = hierarchy
-                        pathway_details.append(details)
-                    results["pathway_details"] = pathway_details
-
-                elif params.pathway_id:
-                    # Get specific pathway details
-                    pathway_details = await self.reactome.get_pathway_details(params.pathway_id)
-                    results["pathway_details"] = pathway_details
-                    
-                    if params.include_hierarchy:
-                        hierarchy = await self.reactome.get_pathway_hierarchy(params.pathway_id)
-                        results["pathway_hierarchy"] = hierarchy
-
-                elif params.disease_id:
-                    # Get disease-related events
-                    disease_events = await self.reactome.get_disease_events(params.disease_id)
-                    results["disease_events"] = disease_events
-
-                return results
+                        if pathways:
+                            results[gene] = {
+                                "status": "success",
+                                "pathways": pathways
+                            }
+                            
+                            if params.include_participants and "pathways" in pathways:
+                                pathway_details = []
+                                for pathway in pathways["pathways"][:5]:
+                                    try:
+                                        details = await self.reactome.get_pathway_details(pathway["stId"])
+                                        if params.include_hierarchy:
+                                            hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
+                                            details["hierarchy"] = hierarchy
+                                        pathway_details.append(details)
+                                    except Exception as e:
+                                        logger.warning(f"Error getting details for pathway {pathway['stId']}: {str(e)}")
+                                        continue
+                                results[gene]["pathway_details"] = pathway_details
+                        else:
+                            results[gene] = {
+                                "status": "no_data",
+                                "message": "No pathways found"
+                            }
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing gene {gene}: {str(e)}")
+                        results[gene] = {
+                            "status": "error",
+                            "message": str(e)
+                        }
+            
+            return results
 
         except Exception as e:
             logger.error(f"Pathway analysis error: {str(e)}")
@@ -261,14 +257,18 @@ class ToolExecutor:
         """Execute molecular mechanism analysis"""
         try:
             params = MolecularMechanismParams(**arguments)
+            
+            # Get protein info
             protein_info = await self._execute_protein_info({"protein_id": params.protein_id})
             
-            # Update pathway analysis call to use genes list
-            pathway_data = await self._execute_pathway_analysis({
-                "genes": [params.protein_id],  # Pass as list of genes
-                "include_hierarchy": True,
-                "include_participants": params.include_pathways
-            }) if params.include_pathways else {}
+            # Get pathway data if requested
+            pathway_data = {}
+            if params.include_pathways:
+                pathway_data = await self._execute_pathway_analysis({
+                    "genes": [params.protein_id],
+                    "include_hierarchy": True,
+                    "include_participants": True
+                })
 
             results = {
                 "protein_id": params.protein_id,
@@ -285,6 +285,7 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Molecular mechanism analysis error: {str(e)}")
             return {"error": f"Mechanism analysis failed: {str(e)}"}
+
 
     async def _execute_genetic_variant_analysis(self, arguments: Dict) -> Dict:
         """Execute genetic variant analysis"""
