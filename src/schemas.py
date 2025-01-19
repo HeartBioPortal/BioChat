@@ -100,34 +100,14 @@ class ProteinInfoParams(BaseModel):
         description="Include protein features in the response"
     )
 
-class ProteinInteractionParams(BaseModel):
-    """Parameters for protein interaction queries"""
-    protein_id: str = Field(
-        description="Protein identifier"
-    )
-    include_indirect: bool = Field(
-        default=True,
-        description="Include indirect interactions"
-    )
-    confidence_score: float = Field(
-        default=0.7,
-        description="Minimum confidence score",
-        ge=0.0,
-        le=1.0
-    )
-    max_interactions: int = Field(
-        default=100,
-        description="Maximum number of interactions to return",
-        ge=1,
-        le=1000
-    )
 
 class PathwayAnalysisParams(BaseModel):
     """Parameters for pathway analysis"""
-    gene_id: Optional[str] = Field(None, description="Gene/protein identifier (UniProt ID)")
+    gene_id: Optional[str] = Field(None, description="Gene/protein identifier")
     pathway_id: Optional[str] = Field(None, description="Reactome pathway ID")
     disease_id: Optional[str] = Field(None, description="Disease identifier")
-    genes: Optional[List[str]] = Field(None, description="List of genes to analyze")  # Add this field
+    genes: Optional[List[str]] = Field(None, description="List of genes to analyze")
+    species: str = Field(default="Homo sapiens", description="Species name")
     include_hierarchy: bool = Field(default=False, description="Include pathway hierarchy")
     include_participants: bool = Field(default=True, description="Include pathway participants")
 
@@ -136,10 +116,10 @@ class PathwayAnalysisParams(BaseModel):
     def validate_inputs(cls, values):
         """Ensure at least one identifier is provided"""
         if not any([
-            values.get('gene_id'), 
-            values.get('pathway_id'), 
+            values.get('gene_id'),
+            values.get('pathway_id'),
             values.get('disease_id'),
-            values.get('genes')  # Add genes to validation
+            values.get('genes')
         ]):
             raise ValueError("At least one of gene_id, pathway_id, disease_id, or genes must be provided")
         return values
@@ -162,33 +142,6 @@ class GeneticVariantParams(BaseModel):
         description="Population identifier"
     )
 
-class MolecularMechanismParams(BaseModel):
-    """Parameters for molecular mechanism analysis"""
-    protein_id: str = Field(
-        description="Protein identifier"
-    )
-    mechanism_types: List[str] = Field(
-        description="Types of mechanisms to analyze",
-        default_factory=lambda: ["protein_function", "pathway_interaction"]
-    )
-    include_pathways: bool = Field(
-        default=True,
-        description="Include pathway information"
-    )
-    include_interactions: bool = Field(
-        default=True,
-        description="Include protein interactions"
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "protein_id": "BRCA1",
-                "mechanism_types": ["protein_function", "pathway_interaction"],
-                "include_pathways": True,
-                "include_interactions": True
-            }
-        }
 
 class TargetAnalysisParams(BaseModel):
     """Parameters for target analysis using Open Targets"""
@@ -214,7 +167,52 @@ class DiseaseAnalysisParams(BaseModel):
         le=1.0
     )
 
-# OpenAI tool definitions
+class PharmGKBClinicalParams(BaseModel):
+    """Parameters for PharmGKB clinical annotation queries"""
+    drug_id: Optional[str] = Field(None, description="PharmGKB drug identifier")
+    gene_id: Optional[str] = Field(None, description="PharmGKB gene identifier")
+
+class PharmGKBVariantParams(BaseModel):
+    """Parameters for PharmGKB variant annotation queries"""
+    variant_id: str = Field(description="Variant identifier")
+    drug_id: Optional[str] = Field(None, description="Drug identifier")
+
+class PharmGKBDiseaseParams(BaseModel):
+    """Parameters for PharmGKB disease association queries"""
+    disease_id: str = Field(description="Disease identifier")
+    association_type: Optional[str] = Field(None, description="Type of association")
+
+class BioGridInteractionParams(BaseModel):
+    """Parameters for BioGRID interaction queries"""
+    gene_list: List[str] = Field(description="List of gene identifiers")
+    include_interactors: bool = Field(default=False, description="Include first-order interactions")
+    tax_id: Optional[str] = Field(None, description="Organism identifier")
+
+class BioGridChemicalParams(BaseModel):
+    """Parameters for BioGRID chemical interaction queries"""
+    gene_list: List[str] = Field(description="Gene list")
+    chemical_list: Optional[List[str]] = Field(None, description="Chemical identifiers")
+    evidence_list: Optional[List[str]] = Field(None, description="Evidence types")
+
+class IntActSearchParams(BaseModel):
+    """Parameters for IntAct interaction queries"""
+    query: str = Field(description="Search query string")
+    species: Optional[str] = Field(None, description="Species filter")
+    negative_filter: str = Field(
+        default="POSITIVE_ONLY",
+        description="Include/exclude negative interactions"
+    )
+    page: int = Field(default=0, description="Page number")
+    page_size: int = Field(default=10, description="Results per page")
+
+class StringDBEnrichmentParams(BaseModel):
+    """Parameters for STRING-DB enrichment analysis"""
+    identifiers: List[str] = Field(description="Protein identifiers")
+    species: int = Field(default=9606, description="NCBI taxonomy ID")
+    background_identifiers: Optional[List[str]] = Field(None, description="Custom background set")
+
+
+
 BIOCHAT_TOOLS = [
     {
         "type": "function",
@@ -228,7 +226,7 @@ BIOCHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_variants",
-            "description": "Search for genetic variants in a genomic region using Ensembl. Use this when the user asks about genetic variations or mutations in specific genomic regions.",
+            "description": "Search for genetic variants in a genomic region using Ensembl.",
             "parameters": VariantSearchParams.model_json_schema(),
             "required": ["chromosome", "start", "end"]
         }
@@ -237,7 +235,7 @@ BIOCHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_gwas",
-            "description": "Search GWAS Catalog for genetic associations with traits and diseases. Use this when the user asks about genetic associations with diseases or traits.",
+            "description": "Search GWAS Catalog for genetic associations with traits and diseases.",
             "parameters": GWASSearchParams.model_json_schema(),
             "required": ["trait"]
         }
@@ -246,7 +244,7 @@ BIOCHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_protein_info",
-            "description": "Get detailed protein information from UniProt. Use this when the user asks about protein structure, function, or annotations.",
+            "description": "Get detailed protein information from UniProt.",
             "parameters": ProteinInfoParams.model_json_schema(),
             "required": ["protein_id"]
         }
@@ -254,19 +252,72 @@ BIOCHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "analyze_protein_interactions",
-            "description": "Analyze protein-protein interactions using STRING-DB and BioGRID. Use this for understanding protein interaction networks.",
-            "parameters": ProteinInteractionParams.model_json_schema(),
-            "required": ["protein_id"]
+            "name": "get_string_interactions",
+            "description": "Get protein-protein interactions from STRING-DB.",
+            "parameters": StringDBEnrichmentParams.model_json_schema(),
+            "required": ["identifiers"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_biogrid_interactions",
+            "description": "Get protein interaction data from BioGRID.",
+            "parameters": BioGridInteractionParams.model_json_schema(),
+            "required": ["gene_list"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_intact_interactions",
+            "description": "Search molecular interactions in IntAct database.",
+            "parameters": IntActSearchParams.model_json_schema(),
+            "required": ["query"]
         }
     },
     {
         "type": "function",
         "function": {
             "name": "analyze_pathways",
-            "description": "Analyze biological pathways using Reactome and BioCyc. Use this for understanding pathway involvement and regulation.",
+            "description": "Analyze biological pathways using Reactome.",
             "parameters": PathwayAnalysisParams.model_json_schema(),
             "required": ["genes"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pharmgkb_annotations",
+            "description": "Get pharmacogenomic annotations from PharmGKB.",
+            "parameters": PharmGKBClinicalParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pharmgkb_variants",
+            "description": "Get variant annotations from PharmGKB.",
+            "parameters": PharmGKBVariantParams.model_json_schema(),
+            "required": ["variant_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_target",
+            "description": "Analyze a target using Open Targets Platform.",
+            "parameters": TargetAnalysisParams.model_json_schema(),
+            "required": ["target_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_disease",
+            "description": "Analyze a disease using Open Targets Platform.",
+            "parameters": DiseaseAnalysisParams.model_json_schema(),
+            "required": ["disease_id"]
         }
     },
     {
@@ -281,29 +332,10 @@ BIOCHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "analyze_molecular_mechanisms",
-            "description": "Analyze molecular mechanisms including protein function, interactions, and pathway involvement.",
-            "parameters": MolecularMechanismParams.model_json_schema(),
-            "required": ["protein_id"]
-        }
-    },
-        {
-        "type": "function",
-        "function": {
-            "name": "analyze_target",
-            "description": "Analyze a target (gene/protein) using Open Targets Platform, including safety, drugs, and disease associations.",
-            "parameters": TargetAnalysisParams.model_json_schema(),
-            "required": ["target_id"]
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "analyze_disease",
-            "description": "Analyze a disease using Open Targets Platform, including associated targets and therapeutic approaches.",
-            "parameters": DiseaseAnalysisParams.model_json_schema(),
-            "required": ["disease_id"]
+            "name": "get_biogrid_chemical_interactions",
+            "description": "Get protein-chemical interaction data from BioGRID.",
+            "parameters": BioGridChemicalParams.model_json_schema(),
+            "required": ["gene_list"]
         }
     }
-
 ]
