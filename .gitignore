@@ -1,11 +1,11 @@
-**.pyc
+**/*.pyc
 .env
 .env*
 *.log
 .coverage
 tests/logs/
 300
-**.txt
-**.xlm
-**.html
-**.json
+**/*.txt
+**/*.xlm
+**/*.html
+**/*.json
