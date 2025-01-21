@@ -1,7 +1,11 @@
-**.pyc
+**/*.pyc
 .env
 .env*
 *.log
 .coverage
 tests/logs/
 300
+**/*.html
+**/*.xml
+**/*.json
+**/*.txt
