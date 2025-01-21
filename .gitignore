@@ -5,3 +5,7 @@
 .coverage
 tests/logs/
 300
+**.txt
+**.xlm
+**.html
+**.json
