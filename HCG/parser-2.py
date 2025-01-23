@@ -45,6 +45,7 @@ class GuidelineParser(XMLParser):
         super().__init__(xml_path)
         self.config = config
         self.recommendations: List[GuidelineData] = []
+        self.font_specs = self._get_font_specs()
         
     def parse(self) -> List[GuidelineData]:
         """Parse the guideline document and extract recommendations."""
@@ -57,32 +58,121 @@ class GuidelineParser(XMLParser):
             return self._parse_v1(all_nodes)
         else:
             return self._parse_v2(all_nodes)
-
+    
+    def _get_font_specs(self) -> Dict[str, Dict]:
+        """Extract font specifications from the XML."""
+        font_specs = {}
+        for fontspec in self.tree.findall('.//fontspec'):
+            font_id = fontspec.get('id')
+            font_specs[font_id] = {
+                'size': fontspec.get('size'),
+                'family': fontspec.get('family'),
+                'color': fontspec.get('color')
+            }
+        return font_specs
+    
     def _parse_v1(self, nodes: List[ET.Element]) -> List[GuidelineData]:
         """Parse version 1 format guidelines."""
         current_data = None
+        i = 0
         
-        for i, node in enumerate(nodes):
+        while i < len(nodes):
+            node = nodes[i]
             text = self.get_text_from_node(node)
             left = int(node.get('left', '0'))
-            
-            # Check if this is a recommendation section title
-            if (self.config['left_down'] <= left <= self.config['left_up'] and 
-                'recommendation' in text.lower()):
+            font = node.get('font', '')
+
+            # Check for recommendation section
+            if self._is_section_header(node):
                 if current_data and current_data.recommendations:
                     self.recommendations.append(current_data)
                 current_data = GuidelineData(text, "", [])
-                
-            # Check for recommendation rows (COR, LOE, text)
-            elif current_data and text in {'IIa', 'IIb'}:
-                recommendation = self._parse_recommendation_row(nodes, i)
-                if recommendation:
-                    current_data.recommendations.append(recommendation)
-                    
+                i += 1
+                continue
+
+            # Check for recommendation row
+            if current_data and self._is_cor_node(node):
+                try:
+                    recommendation = self._parse_recommendation_sequence(nodes[i:i+10])
+                    if recommendation:
+                        current_data.recommendations.append(recommendation)
+                        # Skip the nodes we just processed
+                        i += 3  # Usually COR, LOE, and start of recommendation text
+                except Exception as e:
+                    print(f"Error parsing recommendation: {e}")
+                    i += 1
+            else:
+                i += 1
+
         if current_data and current_data.recommendations:
             self.recommendations.append(current_data)
             
         return self.recommendations
+
+    def _is_section_header(self, node: ET.Element) -> bool:
+        """Determine if node is a section header."""
+        text = self.get_text_from_node(node).lower()
+        left = int(node.get('left', '0'))
+        
+        # Check both position and content
+        return ((self.config['left_down'] <= left <= self.config['left_up']) and 
+                ('recommendation' in text or 
+                 'table' in text or 
+                 text.startswith('class') or
+                 text.endswith('recommendations')))
+
+    def _is_cor_node(self, node: ET.Element) -> bool:
+        """Determine if node contains a COR value."""
+        text = self.get_text_from_node(node).strip()
+        font = node.get('font', '')
+        
+        # Check for both numeric and roman numeral COR values
+        return (text in {'1', '2a', '2b', '3', 'IIa', 'IIb', 'III'} or
+                text.startswith('Value Statement:'))
+
+    def _parse_recommendation_sequence(self, nodes: List[ET.Element]) -> Optional[Dict[str, Any]]:
+        """Parse a sequence of nodes that make up a recommendation."""
+        try:
+            # First node should be COR
+            cor = self.get_text_from_node(nodes[0])
+            
+            # Find LOE node (usually next node with similar formatting)
+            loe_node = next(n for n in nodes[1:4] if self._is_loe_node(n))
+            loe = self.get_text_from_node(loe_node)
+            
+            # Get recommendation text (collect text until we hit another COR or section)
+            text = ""
+            for node in nodes[2:]:
+                node_text = self.get_text_from_node(node)
+                if self._is_cor_node(node) or self._is_section_header(node):
+                    break
+                text += " " + node_text
+            
+            text = text.strip()
+            if not all([cor, loe, text]):
+                return None
+
+            citations = self._extract_citations(text)
+            
+            return {
+                'COR': cor,
+                'LOE': loe,
+                'recommendation': text,
+                'citations': citations
+            }
+            
+        except Exception as e:
+            print(f"Error in recommendation sequence: {e}")
+            return None
+
+    def _is_loe_node(self, node: ET.Element) -> bool:
+        """Determine if node contains an LOE value."""
+        text = self.get_text_from_node(node).strip()
+        return (text.startswith('B-') or 
+                text.startswith('C-') or 
+                text == 'B-R' or 
+                text == 'B-NR' or 
+                text == 'C-LD')
 
     def _parse_v2(self, nodes: List[ET.Element]) -> List[GuidelineData]:
         """Parse version 2 format guidelines."""
