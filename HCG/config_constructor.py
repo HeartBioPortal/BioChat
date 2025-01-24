@@ -6,43 +6,107 @@ import re
 import json
 
 class ConfigConstructor:
-    """Analyzes XML files to automatically determine parsing configurations."""
-    
     def __init__(self, pdfs_dir: str = 'PDFs'):
         self.pdfs_dir = Path(pdfs_dir)
         self.configs: List[Dict[str, Any]] = []
 
-    def analyze_directory(self) -> None:
-        """Walk through PDF directories and analyze XML files."""
-        for dir_path in self.pdfs_dir.iterdir():
-            if dir_path.is_dir():
-                xml_files = list(dir_path.glob('*.xml'))
-                if xml_files:
-                    # Analyze the first XML file found 
-                    config = self.analyze_xml(xml_files[0], dir_path)
-                    if config:
-                        self.configs.append(config)
-
     def analyze_xml(self, xml_path: Path, dir_path: Path) -> Dict[str, Any]:
-        """Analyze a single XML file to determine its configuration parameters."""
-        try:
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
-            
-            # Initialize config with basic info
-            config = {
-                'directory': str(dir_path),
-                'guideline_xml': xml_path.name,
-                'cit_version': self.detect_citation_version(root),
-                'guideline_version': self.detect_guideline_version(root),
-                'left_margins': self.analyze_left_margins(root)
-            }
-            
-            return config
-            
-        except ET.ParseError:
-            print(f"Failed to parse XML file: {xml_path}")
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        # Find tables
+        tables = self.find_tables(root)
+        if not tables:
             return {}
+
+        # Get left margins from first recommendation table found
+        left_margins = self.get_table_margins(tables[0])
+        if not left_margins:
+            return {}
+
+        config = {
+            'directory': str(dir_path),
+            'guideline_xml': xml_path.name,
+            'cit_version': self.detect_citation_version(root),
+            'guideline_version': self.detect_guideline_version(root),
+            'left_down': left_margins['cor_margin'],
+            'left_up': left_margins['text_margin']
+        }
+        return config
+
+    def find_tables(self, root: ET.Element) -> List[List[ET.Element]]:
+        """Find recommendation tables in the document."""
+        tables = []
+        current_table = []
+        in_table = False
+
+        for node in root.findall('.//text'):
+            text = ''.join(node.itertext()).strip()
+            
+            # Detect table start
+            if ('table' in text.lower() and any(x in text.lower() for x in ['recommendations', 'recommendation'])):
+                in_table = True
+                current_table = []
+                continue
+
+            # Collect table elements
+            if in_table:
+                if 'synopsis' in text.lower():  # Table typically ends before synopsis
+                    in_table = False
+                    if current_table:
+                        tables.append(current_table)
+                else:
+                    current_table.append(node)
+
+        return tables
+
+    def get_table_margins(self, table_nodes: List[ET.Element]) -> Dict[str, int]:
+        """Analyze table structure to get correct margins."""
+        cor_margins = []
+        text_margins = []
+        
+        for i, node in enumerate(table_nodes):
+            text = ''.join(node.itertext()).strip()
+            left = int(node.get('left', '0'))
+            
+            # Look for COR values
+            if text in {'1', '2a', '2b', '3', 'IIa', 'IIb', 'III'}:
+                cor_margins.append(left)
+                
+                # If we found a COR value, the recommendation text usually follows
+                for next_node in table_nodes[i+1:i+3]:
+                    next_text = ''.join(next_node.itertext()).strip()
+                    if next_text and any(c.isdigit() for c in next_text):
+                        text_margins.append(int(next_node.get('left', '0')))
+                        break
+
+        if not cor_margins or not text_margins:
+            return {}
+
+        return {
+            'cor_margin': min(cor_margins),
+            'text_margin': min(text_margins)
+        }
+
+    def detect_citation_version(self, root: ET.Element) -> int:
+        for node in root.findall('.//text'):
+            text = ''.join(node.itertext()).strip()
+            if re.search(r'S\d+[\d,\s.-]+', text):
+                return 1
+        return 2
+
+    def detect_guideline_version(self, root: ET.Element) -> int:
+        table_found = False
+        recommendation_pattern = 0
+        
+        for node in root.findall('.//text'):
+            text = ''.join(node.itertext()).strip()
+            if 'table' in text.lower() and 'recommendations' in text.lower():
+                table_found = True
+            elif table_found and "recommendations for" in text.lower():
+                recommendation_pattern += 1
+        
+        return 2 if recommendation_pattern > 5 else 1
 
     def detect_citation_version(self, root: ET.Element) -> int:
         """Detect citation format version based on reference patterns."""
