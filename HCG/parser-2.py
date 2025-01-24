@@ -98,7 +98,8 @@ class GuidelineParser(XMLParser):
                         current_data.recommendations.append(recommendation)
                         # Skip the nodes we just processed
                         i += 3  # Usually COR, LOE, and start of recommendation text
-                except Exception as e:
+                except:
+                    raise
                     print(f"Error parsing recommendation: {e}")
                     i += 1
             else:
@@ -161,8 +162,9 @@ class GuidelineParser(XMLParser):
                 'citations': citations
             }
             
-        except Exception as e:
-            print(f"Error in recommendation sequence: {e}")
+        except:
+            print(f"Error in _parse_recommendation_sequence ")
+            raise
             return None
 
     def _is_loe_node(self, node: ET.Element) -> bool:
