@@ -132,13 +132,44 @@ class PDFProcessor:
                         logging.error(f"Failed to process {pdf_path}: {str(e)}")
                         continue
 
+
+
+def clean_jsons(json_dir: str, output_dir: str):
+    """Clean up JSON files and save them to a new directory."""
+    json_dir = Path(json_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+    
+    # d['raw_text'].strip('`json').replace('\n', '')
+    for dir_name in os.listdir(json_dir):
+        if os.path.isdir(json_dir / dir_name):
+            output_path = output_dir / (dir_name + '.json')
+            final_data = []
+            json_files = list(os.listdir(json_dir / dir_name))
+            for json_file in tqdm(json_files, desc=f"Cleaning {dir_name}"):
+                with open(json_dir / dir_name / json_file, 'r') as f:
+                    data = json.load(f)
+                    # Remove any keys with empty values
+                    try:
+                        result = json.loads(data['raw_text'].strip('`json').replace('\n', ''))
+                    except (json.JSONDecodeError, KeyError):
+                        print(f"Error parsing JSON in {json_file}")
+                        continue
+                    else:
+                        final_data.append(result)
+            # Save the cleaned JSON to the output directory
+            with open(output_path, 'w') as f:
+                json.dump(final_data, f, indent=4)
+
 def main():
     """Main execution function."""
-    pdf_processor = PDFProcessor(
-        pdf_dir="PDFs",
-        output_dir="OpenAI_outputs"
-    )
-    pdf_processor.process_all_pdfs()
+    # pdf_processor = PDFProcessor(
+    #     pdf_dir="PDFs",
+    #     output_dir="OpenAI_outputs"
+    # )
+    # pdf_processor.process_all_pdfs()
+
+    clean_jsons("OpenAI_outputs", "Cleaned_outputs")
 
 if __name__ == "__main__":
     main()
