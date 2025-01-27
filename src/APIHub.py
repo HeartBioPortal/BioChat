@@ -309,6 +309,21 @@ class StringDBClient(BioDatabaseAPI):
         self.base_url = "https://string-db.org/api"  # Updated base URL
         self.caller_identity = caller_identity
 
+    async def search(self, query: str) -> Dict:
+        """Implement the abstract search method for STRING-DB"""
+        try:
+            # Convert gene/protein name to identifier format
+            params = {
+                "identifiers": query,
+                "species": 9606,  # Human
+                "network_type": "functional",
+                "caller_identity": self.caller_identity
+            }
+            return await self._make_request("tsv/interaction_partners", params)
+        except Exception as e:
+            logger.error(f"STRING-DB search error: {str(e)}")
+            return {"error": str(e)}
+        
     async def get_interaction_partners(self, 
                                     identifiers: Union[str, List[str]], 
                                     species: int = 9606,
@@ -504,6 +519,19 @@ class PharmGKBClient(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://api.pharmgkb.org/v1/data"
 
+    async def search(self, query: str) -> Dict:
+        """Implement the abstract search method for PharmGKB"""
+        try:
+            # Use general search endpoint with query
+            params = {
+                "q": query,
+                "view": "base"  # Basic view level
+            }
+            return await self._make_request("search", params)
+        except Exception as e:
+            logger.error(f"PharmGKB search error: {str(e)}")
+            return {"error": str(e)}
+        
     async def get_clinical_annotations(self, 
                                     drug_id: Optional[str] = None,
                                     gene_id: Optional[str] = None) -> Dict:
@@ -569,6 +597,21 @@ class BioGridClient(BioDatabaseAPI):
         super().__init__(api_key=access_key)
         self.base_url = "https://webservice.thebiogrid.org"
 
+    async def search(self, query: str) -> Dict:
+        """Implement the abstract search method for BioGRID"""
+        try:
+            params = {
+                "geneList": query,
+                "searchIds": "true",
+                "searchNames": "true",
+                "format": "json",
+                "accessKey": self.api_key
+            }
+            return await self._make_request("interactions", params)
+        except Exception as e:
+            logger.error(f"BioGRID search error: {str(e)}")
+            return {"error": str(e)}
+    
     async def get_core_interactions(self,
                                   gene_list: List[str],
                                   include_interactors: bool = False,
