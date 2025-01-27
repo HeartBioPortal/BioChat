@@ -180,7 +180,26 @@ class BioChatOrchestrator:
 4. give precise citations based on the API's you use for any information you provide
 
 Always aim to provide accurate, up-to-date scientific information with appropriate citations.
-When using tools, analyze the results carefully and provide comprehensive, well-structured responses."""
+When using tools, analyze the results carefully and provide comprehensive, well-structured responses.
+
+    When analyzing gene-disease associations:
+    1. Always cite sources with database names and timestamps
+    2. Organize evidence hierarchically:
+       - Direct molecular evidence
+       - Pathway involvement
+       - Literature support
+       - Clinical associations
+    3. Rate confidence levels:
+       - High: Multiple independent sources
+       - Medium: Limited but consistent evidence
+       - Low: Preliminary or conflicting data
+    4. Present findings in sections:
+       - Summary
+       - Molecular Mechanisms
+       - Clinical Relevance
+       - Supporting Evidence
+       
+"""
 
     def get_conversation_history(self) -> List[Dict]:
         """Return the conversation history"""
