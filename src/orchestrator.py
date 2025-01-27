@@ -30,10 +30,7 @@ class BioChatOrchestrator:
     async def process_query(self, user_query: str) -> str:
         """Process a user query through the ChatGPT model and execute necessary database queries"""
         try:
-            # Break down complex queries if needed
-            if self._is_complex_gene_query(user_query):
-                return await self._handle_complex_gene_query(user_query)
-                
+
             # Original process_query logic for simple queries...
             self.conversation_history.append({"role": "user", "content": user_query})
             
@@ -118,32 +115,6 @@ class BioChatOrchestrator:
             error_message = f"An error occurred: {str(e)}"
             self.conversation_history.append({"role": "assistant", "content": error_message})
             return error_message
-    
-    def _is_complex_gene_query(self, query: str) -> bool:
-            """Check if query involves multiple genes"""
-            # Simple heuristic - count gene symbols
-            common_genes = ["BRCA1", "BRCA2", "TP53", "DSP", "PCSK9"]
-            mentioned_genes = [gene for gene in common_genes if gene in query]
-            return len(mentioned_genes) > 2
-
-    async def _handle_complex_gene_query(self, query: str) -> str:
-        """Handle queries involving multiple genes by breaking them down"""
-        common_genes = ["BRCA1", "BRCA2", "TP53", "DSP", "PCSK9"]
-        mentioned_genes = [gene for gene in common_genes if gene in query]
-        
-        responses = []
-        for gene in mentioned_genes:
-            # Process each gene separately
-            sub_query = f"What is known about {gene} in the context of {query}?"
-            response = await self.process_single_gene_query(sub_query)
-            responses.append(response)
-            
-        # Synthesize responses
-        combined = "Analysis of multiple genes:\n\n"
-        for gene, response in zip(mentioned_genes, responses):
-            combined += f"\n### {gene}:\n{response}\n"
-            
-        return combined
 
     async def process_single_gene_query(self, query: str) -> str:
         """Process a query about a single gene"""
@@ -174,31 +145,30 @@ class BioChatOrchestrator:
     def _create_system_message(self) -> str:
         """Create the system message that guides the model's behavior"""
         return """You are BioChat, an AI assistant specialized in biological and medical research. Your role is to:
-1. Understand user queries about biological/medical topics
-2. Use the appropriate database APIs to fetch relevant information
-3. Synthesize and explain the information in a clear, scientific manner
-4. give precise citations based on the API's you use for any information you provide
+        1. Always cite sources with database names and timestamps
+2. Understand user queries about biological/medical topics
+3. Use the appropriate database APIs to fetch relevant information
+4. Synthesize and explain the information in a clear, scientific manner
+5. give precise citations based on the API's you use for any information you provide
 
 Always aim to provide accurate, up-to-date scientific information with appropriate citations.
 When using tools, analyze the results carefully and provide comprehensive, well-structured responses.
 
-    When analyzing gene-disease associations:
-    1. Always cite sources with database names and timestamps
-    2. Organize evidence hierarchically:
+    6. Organize evidence hierarchically:
        - Direct molecular evidence
        - Pathway involvement
        - Literature support
        - Clinical associations
-    3. Rate confidence levels:
+    7. Rate confidence levels:
        - High: Multiple independent sources
        - Medium: Limited but consistent evidence
        - Low: Preliminary or conflicting data
-    4. Present findings in sections:
+    8. Present findings in sections:
        - Summary
        - Molecular Mechanisms
        - Clinical Relevance
        - Supporting Evidence
-       
+
 """
 
     def get_conversation_history(self) -> List[Dict]:
