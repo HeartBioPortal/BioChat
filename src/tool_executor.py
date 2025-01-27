@@ -8,8 +8,9 @@ from src.APIHub import (
     IntActClient, BioCyc, BioGridClient, OpenTargetsClient
 )
 from src.schemas import (
-    BioGridChemicalParams, BioGridInteractionParams, IntActSearchParams, LiteratureSearchParams, PharmGKBClinicalParams, PharmGKBVariantParams, StringDBEnrichmentParams, VariantSearchParams, GWASSearchParams, ProteinInfoParams,
-    ProteinInteractionParams, PathwayAnalysisParams, MolecularMechanismParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams
+    BioGridChemicalParams, BioGridInteractionParams, IntActSearchParams, LiteratureSearchParams, 
+    PharmGKBClinicalParams, PharmGKBVariantParams, StringDBEnrichmentParams, VariantSearchParams, 
+    GWASSearchParams, ProteinInfoParams, PathwayAnalysisParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams
 )
 
 # Configure logger
@@ -20,26 +21,6 @@ logging.basicConfig(
 )
 
 class ToolExecutor:
-
-    SYSTEM_GUIDANCE = """
-    When analyzing gene-disease associations:
-    1. Always cite sources with database names and timestamps
-    2. Organize evidence hierarchically:
-       - Direct molecular evidence
-       - Pathway involvement
-       - Literature support
-       - Clinical associations
-    3. Rate confidence levels:
-       - High: Multiple independent sources
-       - Medium: Limited but consistent evidence
-       - Low: Preliminary or conflicting data
-    4. Present findings in sections:
-       - Summary
-       - Molecular Mechanisms
-       - Clinical Relevance
-       - Supporting Evidence
-    """
-
     def __init__(self, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str = None):
         """Initialize database clients with appropriate credentials"""
         # Initialize core clients with error handling
@@ -73,7 +54,6 @@ class ToolExecutor:
             
             logger.info(f"Executing tool: {function_name}")
             
-            # Updated handlers mapping
             handlers = {
                 "search_literature": self._execute_literature_search,
                 "search_variants": self._execute_variant_search,
