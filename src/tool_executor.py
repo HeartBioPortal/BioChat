@@ -66,7 +66,6 @@ class ToolExecutor:
                 "analyze_pathways": self._execute_pathway_analysis,
                 "get_pharmgkb_annotations": self._execute_pharmgkb_annotations,
                 "get_pharmgkb_variants": self._execute_pharmgkb_variants,
-                "analyze_genetic_variants": self._execute_genetic_variants,
                 "analyze_target": self._execute_target_analysis,
                 "analyze_disease": self._execute_disease_analysis
             }
@@ -388,7 +387,7 @@ class ToolExecutor:
             }),
             "molecular": await self._execute_protein_info({"protein_id": gene}),
             "pathways": await self._execute_pathway_analysis({"genes": [gene]}),
-            "variants": await self._execute_genetic_variants({"gene": gene}),
+            "variants": await self._execute_variant_search({"gene": gene}),
             "clinical": await self._execute_pharmgkb_annotations({
                 "gene_id": gene
             })
