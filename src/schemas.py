@@ -323,15 +323,6 @@ BIOCHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "analyze_genetic_variants",
-            "description": "Analyze genetic variants and their clinical implications using various databases.",
-            "parameters": GeneticVariantParams.model_json_schema(),
-            "required": ["gene"]
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_biogrid_chemical_interactions",
             "description": "Get protein-chemical interaction data from BioGRID.",
             "parameters": BioGridChemicalParams.model_json_schema(),
