@@ -41,11 +41,11 @@ class BioChatOrchestrator:
 
             try:
                 initial_completion = await self.client.chat.completions.create(
-                    model="gpt-4-0125-preview",
+                    model="gpt-4o",
                     messages=messages,
                     tools=BIOCHAT_TOOLS,
                     tool_choice="auto",
-                    max_tokens=4096  # Add token limit
+                    max_tokens=10000  # Add token limit
                 )
 
                 initial_message = initial_completion.choices[0].message
@@ -96,7 +96,7 @@ class BioChatOrchestrator:
                 ]
                 
                 final_completion = await self.client.chat.completions.create(
-                    model="gpt-4-0125-preview",  # Fixed model name
+                    model="gpt-4o",  # Fixed model name
                     messages=messages
                 )
 
@@ -128,11 +128,11 @@ class BioChatOrchestrator:
             ]
 
             completion = await self.client.chat.completions.create(
-                model="gpt-4-0125-preview",
+                model="gpt-4o",
                 messages=messages,
                 tools=BIOCHAT_TOOLS,
                 tool_choice="auto",
-                max_tokens=2048  # Smaller token limit for sub-queries
+                max_tokens=4000  
             )
             
             return completion.choices[0].message.content
