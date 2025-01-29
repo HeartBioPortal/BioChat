@@ -213,7 +213,8 @@ class ToolExecutor:
                           if params.gene.upper() in str(v.get('mapped_genes', '')).upper()}
             return results
         except Exception as e:
-            logger.error(f"GWAS search error: {str(e)}", exc_info=True)
+
+            logger.error(f"GWAS search error: {str(e)} result was {results}", exc_info=True)
             return {"error": f"GWAS search failed: {str(e)}"}
 
     async def _execute_protein_info(self, arguments: Dict) -> Dict:
