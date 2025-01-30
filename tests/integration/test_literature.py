@@ -6,7 +6,7 @@ from tests.utils.logger import test_logger
 @pytest.mark.asyncio
 async def test_complex_query(integration_orchestrator, clear_conversation_history):
     """Test handling of a complex technical query"""
-    query = """What is the mechanistic relationship between PCSK9 and coronary artery disease"""
+    query = """ find protein and genes related to HDL Cholesterol especially in Native Hawaiian and Pacific Islander Populations"""
     
     response = await integration_orchestrator.process_query(query)
     
