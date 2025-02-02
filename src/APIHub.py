@@ -378,25 +378,12 @@ class ReactomeClient(BioDatabaseAPI):
     
     def __init__(self):
         super().__init__()
-        self.base_url = "https://reactome.org/ContentService/data"
+        self.base_url = "https://reactome.org/ContentService/"
         self.headers = {"Content-Type": "application/json"}
-
-    async def get_uniprot_id(self, gene_symbol: str) -> str:
-        """Convert gene symbol to UniProt ID using UniProt API"""
-        uniprot = UniProtAPI()
-        try:
-            search_result = await uniprot.search(gene_symbol)
-            if 'results' in search_result and search_result['results']:
-                return search_result['results'][0].get('id')
-            return None
-        except Exception as e:
-            logger.error(f"Error converting gene symbol to UniProt ID: {str(e)}")
-            return None
-
+    
     async def search(self, query: str) -> Dict:
         """Base search method implementation"""
         try:
-            # Use search/query endpoint with pathway type
             params = {
                 "query": query,
                 "species": "Homo sapiens",
@@ -408,63 +395,95 @@ class ReactomeClient(BioDatabaseAPI):
             logger.error(f"Reactome search error: {str(e)}")
             return {"error": str(e)}
 
-    async def get_pathways_for_gene(self, gene_id: str) -> Dict:
-        """Get pathways involving a specific gene/protein"""
-        try:
-            # Convert gene symbol to UniProt ID if needed
-            if not gene_id.startswith('P') and not gene_id.startswith('Q'):
-                uniprot_id = await self.get_uniprot_id(gene_id)
-                if uniprot_id:
-                    gene_id = uniprot_id
-                else:
-                    logger.warning(f"Could not find UniProt ID for gene {gene_id}")
-                    return {"error": f"Could not find UniProt ID for gene {gene_id}"}
-
-            # Try first endpoint
-            endpoint = f"pathways/low/entity/{gene_id}"
-            return await self._make_request(endpoint)
-        except Exception as e:
-            logger.error(f"Error getting pathways for gene {gene_id}: {str(e)}")
-            return {"error": str(e)}
+    # async def get_pathways_for_gene(self, uniprot_id: str) -> Dict:
+    #     """
+    #     Get pathways involving a specific protein using UniProt ID.
+        
+    #     Args:
+    #         uniprot_id: UniProt accession number (e.g., P53)
+            
+    #     Returns:
+    #         Dict containing pathway information or error message
+    #     """
+    #     try:
+    #         # Use the correct endpoint for UniProt to pathway mapping
+    #         endpoint = f"data/mapping/UniProt/{uniprot_id}/pathways"
+    #         pathways = await self._make_request(endpoint)
+            
+    #         if not pathways:
+    #             return {"pathways": [], "message": f"No pathways found for UniProt ID {uniprot_id}"}
+            
+    #         return {
+    #             "pathways": pathways,
+    #             "count": len(pathways)
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error getting pathways for UniProt ID {uniprot_id}: {str(e)}")
+    #         return {"error": str(e)}
 
     async def get_pathway_details(self, pathway_id: str) -> Dict:
-        """Get detailed information about a specific pathway"""
+        """
+        Get detailed information about a specific pathway
+        
+        Args:
+            pathway_id: Reactome pathway ID (e.g., R-HSA-1234)
+            
+        Returns:
+            Dict containing pathway details and participants
+        """
         try:
-            # Use pathway endpoint
-            endpoint = f"pathway/{pathway_id}"
+            # Get basic pathway information
+            endpoint = f"data/pathway/{pathway_id}/containedEvents"
             details = await self._make_request(endpoint)
             
-            # Get additional pathway information
-            summation = await self._make_request(f"event/{pathway_id}/summation")
-            participants = await self._make_request(f"pathway/{pathway_id}/participants")
+            return details
             
-            return {
-                "details": details,
-                "summation": summation,
-                "participants": participants
-            }
         except Exception as e:
             logger.error(f"Error getting pathway details for {pathway_id}: {str(e)}")
             return {"error": str(e)}
 
-    async def get_pathway_hierarchy(self, pathway_id: str) -> Dict:
-        """Get the hierarchical structure of a pathway"""
+    # async def get_pathway_hierarchy(self, pathway_id: str) -> Dict:
+    #     """
+    #     Get the hierarchical structure of a pathway
+        
+    #     Args:
+    #         pathway_id: Reactome pathway ID
+    #     """
+    #     try:
+    #         endpoint = f"data/pathways/{pathway_id}/hierarchy"
+    #         return await self._make_request(endpoint)
+    #     except Exception as e:
+    #         logger.error(f"Error getting pathway hierarchy for {pathway_id}: {str(e)}")
+    #         return {"error": str(e)}
+
+    async def get_uniprot_mapping(self, uniprot_id: str) -> Dict:
+        """
+        Get all Reactome mappings for a UniProt ID
+        
+        Args:
+            uniprot_id: UniProt accession number
+        """
         try:
-            endpoint = f"pathway/{pathway_id}/hierarchy"
+            endpoint = f"data/mapping/UniProt/{uniprot_id}"
             return await self._make_request(endpoint)
         except Exception as e:
-            logger.error(f"Error getting pathway hierarchy for {pathway_id}: {str(e)}")
+            logger.error(f"Error getting UniProt mapping for {uniprot_id}: {str(e)}")
             return {"error": str(e)}
 
     async def get_disease_events(self, disease_id: str) -> Dict:
-        """Get events associated with a disease"""
+        """
+        Get events associated with a disease
+        
+        Args:
+            disease_id: Disease identifier
+        """
         try:
-            endpoint = f"disease/{disease_id}/events"
+            endpoint = f"data/diseases/{disease_id}/events"
             return await self._make_request(endpoint)
         except Exception as e:
             logger.error(f"Error getting disease events for {disease_id}: {str(e)}")
             return {"error": str(e)}
-
 
 class IntActClient(BioDatabaseAPI):
     def __init__(self):
