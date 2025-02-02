@@ -45,7 +45,7 @@ class BioChatOrchestrator:
                     messages=messages,
                     tools=BIOCHAT_TOOLS,
                     tool_choice="auto",
-                    max_tokens=10000  # Add token limit
+                    # max_completion_tokens=10000 
                 )
 
                 initial_message = initial_completion.choices[0].message
@@ -75,6 +75,7 @@ class BioChatOrchestrator:
                 for tool_call in initial_message.tool_calls:
                     try:
                         function_response = await self.tool_executor.execute_tool(tool_call)
+                        logger.info(f"Tool response: {function_response}")
                         self.conversation_history.append({
                             "role": "tool",
                             "content": json.dumps(function_response),
@@ -132,7 +133,7 @@ class BioChatOrchestrator:
                 messages=messages,
                 tools=BIOCHAT_TOOLS,
                 tool_choice="auto",
-                max_tokens=4000  
+                # max_completion_tokens=4000  
             )
             
             return completion.choices[0].message.content
@@ -168,6 +169,10 @@ When using tools, analyze the results carefully and provide comprehensive, well-
        - Molecular Mechanisms
        - Clinical Relevance
        - Supporting Evidence
+
+       Also please utilize all the API tools available to you to provide the most accurate information possible. And this is very important
+       I want you to ues most of the data you get from APIs eve nif you were to cite them literally. This response is going to be used by
+       researchers for drug discovery so please provide as much information as possible.
 
 """
 
