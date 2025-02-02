@@ -260,9 +260,11 @@ class ToolExecutor:
             results = {}
             
             if params.genes:
+                logger.info(f"Analyzing pathways for genes: {params.genes}")
                 for gene in params.genes:
                     try:
                         # Get pathways for gene
+                        logger.info(f"Getting pathways for gene: {gene}")
                         pathways = await self.reactome.get_pathways_for_gene(gene)
                         
                         if isinstance(pathways, dict) and "error" in pathways:
