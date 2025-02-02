@@ -108,7 +108,7 @@ class PathwayAnalysisParams(BaseModel):
     disease_id: Optional[str] = Field(None, description="Disease identifier")
     genes: Optional[List[str]] = Field(None, description="List of genes to analyze")
     species: str = Field(default="Homo sapiens", description="Species name")
-    include_hierarchy: bool = Field(default=False, description="Include pathway hierarchy")
+    # include_hierarchy: bool = Field(default=False, description="Include pathway hierarchy")
     include_participants: bool = Field(default=True, description="Include pathway participants")
 
     @model_validator(mode='before')
