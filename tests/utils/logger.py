@@ -34,7 +34,7 @@ class TestLogger:
         self.logger.info(f"Test: {test_name}")
         self.logger.info(f"{'='*80}")
         self.logger.info(f"Query: {query}")
-        self.logger.info(f"Response: {response}")
+        # self.logger.info(f"Response: {response}")
         self.logger.info("\nFull Conversation History:")
         
         for msg in conversation_history:
