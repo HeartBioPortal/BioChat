@@ -14,9 +14,9 @@ import asyncio
 import logging
 import ssl
 from tenacity import retry, stop_after_attempt, wait_exponential
+import requests
+from src.utils.biochat_api_logging import BioChatLogger
 
-
-logger = logging.getLogger(__name__)
 
 class BioDatabaseAPI(ABC):
     """Abstract base class for biological database APIs."""
@@ -76,18 +76,26 @@ class BioDatabaseAPI(ABC):
                         retry_after = int(response.headers.get('Retry-After', retry_delay))
                         await asyncio.sleep(retry_after)
                         continue
-                        
                     response.raise_for_status()
-                    return await response.json()
+                    response_text = await response.text()
+                    try:
+                        if "application/json" in response.headers.get("Content-Type", "") or "text/json" in response.headers.get("Content-Type", ""):
+                            return json.loads(response_text)  # Use json.loads() instead of response.json()
+                        else:
+                            BioChatLogger.log_error("Unexpected response format", Exception(f"Headers: {response.headers}"))
+                            return None
+                    except json.JSONDecodeError:
+                        BioChatLogger.log_error("Failed to decode JSON", Exception(response_text[:500]))
+                        return None
                     
             except aiohttp.ClientError as e:
-                logger.error(f"API request error: {str(e)}")
+                BioChatLogger.log_error(f"API request error", e)
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(retry_delay * (attempt + 1))
                 
             except Exception as e:
-                logger.error(f"Unexpected error in API request: {str(e)}")
+                BioChatLogger.log_error(f"Unexpected error in API request", e)
                 raise
 
     async def __aenter__(self):
@@ -113,7 +121,7 @@ class BioDatabaseAPI(ABC):
                 response.raise_for_status()
                 return await response.text()
         except Exception as e:
-            logger.error(f"Raw request error: {str(e)}")
+            BioChatLogger.log_error(f"Raw request error", e)
             raise
 
 
@@ -300,7 +308,7 @@ class NCBIEutils(BioDatabaseAPI):
             return combined_results
             
         except Exception as e:
-            logger.error(f"Error in search_and_analyze: {str(e)}")
+            BioChatLogger.log_error(f"Error in search_and_analyze", e)
             return {"error": str(e)}
 
 class StringDBClient(BioDatabaseAPI):
@@ -308,6 +316,7 @@ class StringDBClient(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://string-db.org/api"  # Updated base URL
         self.caller_identity = caller_identity
+        self.headers = {"Content-Type": "text/json"}
 
     async def search(self, query: str) -> Dict:
         """Implement the abstract search method for STRING-DB"""
@@ -319,9 +328,9 @@ class StringDBClient(BioDatabaseAPI):
                 "network_type": "functional",
                 "caller_identity": self.caller_identity
             }
-            return await self._make_request("tsv/interaction_partners", params)
+            return await self._make_request("json/interaction_partners", params)
         except Exception as e:
-            logger.error(f"STRING-DB search error: {str(e)}")
+            BioChatLogger.log_error(f"STRING-DB search error", e)
             return {"error": str(e)}
         
     async def get_interaction_partners(self, 
@@ -340,7 +349,7 @@ class StringDBClient(BioDatabaseAPI):
             "network_type": network_type,
             "caller_identity": self.caller_identity
         }
-        return await self._make_request("tsv/interaction_partners", params)
+        return await self._make_request("json/interaction_partners", params)
 
     async def get_enrichment(self,
                            identifiers: Union[str, List[str]],
@@ -354,7 +363,7 @@ class StringDBClient(BioDatabaseAPI):
             "species": species,
             "caller_identity": self.caller_identity
         }
-        return await self._make_request("tsv/enrichment", params)
+        return await self._make_request("json/enrichment", params)
 
     async def get_ppi_enrichment(self,
                                identifiers: Union[str, List[str]],
@@ -370,7 +379,7 @@ class StringDBClient(BioDatabaseAPI):
         if background_identifiers:
             params["background_string_identifiers"] = "%0d".join(background_identifiers)
             
-        return await self._make_request("tsv/ppi_enrichment", params)
+        return await self._make_request("json/ppi_enrichment", params)
 
 
 class ReactomeClient(BioDatabaseAPI):
@@ -392,35 +401,30 @@ class ReactomeClient(BioDatabaseAPI):
             endpoint = "search/query"
             return await self._make_request(endpoint, params)
         except Exception as e:
-            logger.error(f"Reactome search error: {str(e)}")
+            BioChatLogger.log_error(f"Reactome search error", e)
             return {"error": str(e)}
 
-    # async def get_pathways_for_gene(self, uniprot_id: str) -> Dict:
-    #     """
-    #     Get pathways involving a specific protein using UniProt ID.
-        
-    #     Args:
-    #         uniprot_id: UniProt accession number (e.g., P53)
+    async def get_pathways_for_gene(self, gene_name: str) -> Dict:
+        try:
+            BioChatLogger.log_info(f"Get uniprot id for gene {gene_name}")
+            uniprot_id = self.get_primary_uniprot_id(gene_name.strip())
+            if not uniprot_id:
+                raise ValueError(f"No UniProt ID found for gene {gene_name}")
+
+            reactome_id = self.get_reactome_id(uniprot_id)
+            if not reactome_id:
+                raise ValueError(f"No Reactome ID found for UniProt ID {uniprot_id}")
+
+            pathways = await self.get_pathway_details(reactome_id)
+            if not pathways:
+                return {"error": f"No pathways found for UniProt ID {uniprot_id}"}
+
+            return {"pathways": pathways, "count": len(pathways)}
             
-    #     Returns:
-    #         Dict containing pathway information or error message
-    #     """
-    #     try:
-    #         # Use the correct endpoint for UniProt to pathway mapping
-    #         endpoint = f"data/mapping/UniProt/{uniprot_id}/pathways"
-    #         pathways = await self._make_request(endpoint)
-            
-    #         if not pathways:
-    #             return {"pathways": [], "message": f"No pathways found for UniProt ID {uniprot_id}"}
-            
-    #         return {
-    #             "pathways": pathways,
-    #             "count": len(pathways)
-    #         }
-            
-    #     except Exception as e:
-    #         logger.error(f"Error getting pathways for UniProt ID {uniprot_id}: {str(e)}")
-    #         return {"error": str(e)}
+        except Exception as e:
+            BioChatLogger.log_error(f"Error getting pathways for gene {gene_name}", e)
+            return {"error": str(e)}
+
 
     async def get_pathway_details(self, pathway_id: str) -> Dict:
         """
@@ -436,27 +440,88 @@ class ReactomeClient(BioDatabaseAPI):
             # Get basic pathway information
             endpoint = f"data/pathway/{pathway_id}/containedEvents"
             details = await self._make_request(endpoint)
-            
             return details
             
         except Exception as e:
-            logger.error(f"Error getting pathway details for {pathway_id}: {str(e)}")
+            BioChatLogger.log_error(f"Error getting pathway details for {pathway_id}", e)
             return {"error": str(e)}
 
-    # async def get_pathway_hierarchy(self, pathway_id: str) -> Dict:
-    #     """
-    #     Get the hierarchical structure of a pathway
-        
-    #     Args:
-    #         pathway_id: Reactome pathway ID
-    #     """
-    #     try:
-    #         endpoint = f"data/pathways/{pathway_id}/hierarchy"
-    #         return await self._make_request(endpoint)
-    #     except Exception as e:
-    #         logger.error(f"Error getting pathway hierarchy for {pathway_id}: {str(e)}")
-    #         return {"error": str(e)}
+    def get_primary_uniprot_id(self, gene_name: str) -> Optional[str]:
+        """
+        Fetch the primary UniProt ID (canonical) for a given gene name.
+        Prioritizes reviewed (SwissProt) entries.
 
+        Args:
+            gene_name: Gene symbol to search for
+
+        Returns:
+            Optional[str]: UniProt ID if found, None otherwise
+        """
+        query = f"(gene:{gene_name}) AND (reviewed:true OR reviewed:false)"
+        url = f"https://rest.uniprot.org/uniprotkb/search?query={query}&fields=accession,reviewed,gene_names&format=json"
+
+
+        BioChatLogger.log_info(f"Fetching UniProt ID from URL: {url}")
+
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+            BioChatLogger.log_info(f"UniProt API Response: {json.dumps(data, indent=4)[:1000]}")
+
+            if not data.get('results'):
+                BioChatLogger.log_info(f"No UniProt entries found for gene {gene_name}")
+                return None
+
+            for entry in data['results']:
+                if "Swiss-Prot" in entry.get('entryType', ''):
+                    for gene in entry.get('genes', []):
+                        gene_name_value = gene.get('geneName', {}).get('value', '').upper()
+                        if gene_name.upper() == gene_name_value:
+                            uniprot_id = entry['primaryAccession']
+                            BioChatLogger.log_info(f"✅ Found reviewed UniProt ID for {gene_name}: {uniprot_id}")
+                            return uniprot_id
+
+            BioChatLogger.log_info(f"No reviewed match found for {gene_name}")
+            return None
+
+        except requests.exceptions.RequestException as e:
+            BioChatLogger.log_error(f"Failed to fetch UniProt ID for {gene_name}: {str(e)}", e)
+            return None
+
+     
+    def get_reactome_id(self, uniprot_id: str) -> Optional[str]:
+        """
+        Fetch the Reactome ID using the primary UniProt ID.
+
+        Args:
+            uniprot_id: UniProt accession number
+
+        Returns:
+            Optional[str]: Reactome ID if found, None otherwise
+        """
+        url = f"https://reactome.org/ContentService/data/mapping/UniProt/{
+            uniprot_id}"
+
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+
+            data = response.json()
+            if not data:
+                print(f"No Reactome mapping found for UniProt ID {uniprot_id}")
+                return None
+
+            # Get the first Reactome ID (there might be multiple)
+            reactome_id = list(data.keys())[0]
+            print(f"Found Reactome ID for {uniprot_id}: {reactome_id}")
+            return reactome_id
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching Reactome ID for {uniprot_id}", e)
+            return None
+    
     async def get_uniprot_mapping(self, uniprot_id: str) -> Dict:
         """
         Get all Reactome mappings for a UniProt ID
@@ -468,7 +533,7 @@ class ReactomeClient(BioDatabaseAPI):
             endpoint = f"data/mapping/UniProt/{uniprot_id}"
             return await self._make_request(endpoint)
         except Exception as e:
-            logger.error(f"Error getting UniProt mapping for {uniprot_id}: {str(e)}")
+            BioChatLogger.log_error(f"Error getting UniProt mapping for {uniprot_id}", e)
             return {"error": str(e)}
 
     async def get_disease_events(self, disease_id: str) -> Dict:
@@ -482,7 +547,7 @@ class ReactomeClient(BioDatabaseAPI):
             endpoint = f"data/diseases/{disease_id}/events"
             return await self._make_request(endpoint)
         except Exception as e:
-            logger.error(f"Error getting disease events for {disease_id}: {str(e)}")
+            BioChatLogger.log_error(f"Error getting disease events for {disease_id}", e)
             return {"error": str(e)}
 
 class IntActClient(BioDatabaseAPI):
@@ -548,7 +613,7 @@ class PharmGKBClient(BioDatabaseAPI):
             }
             return await self._make_request("search", params)
         except Exception as e:
-            logger.error(f"PharmGKB search error: {str(e)}")
+            BioChatLogger.log_error(f"PharmGKB search error", e)
             return {"error": str(e)}
         
     async def get_clinical_annotations(self, 
@@ -628,7 +693,7 @@ class BioGridClient(BioDatabaseAPI):
             }
             return await self._make_request("interactions", params)
         except Exception as e:
-            logger.error(f"BioGRID search error: {str(e)}")
+            BioChatLogger.log_error(f"BioGRID search error", e)
             return {"error": str(e)}
     
     async def get_core_interactions(self,
@@ -716,7 +781,7 @@ class BioCyc(BioDatabaseAPI):
                 }
                 results[gene] = gene_results
             except Exception as e:
-                logger.error(f"Error getting BioCyc data for {gene}: {str(e)}")
+                BioChatLogger.log_error(f"Error getting BioCyc data for {gene}", e)
                 results[gene] = {"error": str(e)}
         return results
 
@@ -744,7 +809,7 @@ class EnsemblAPI(BioDatabaseAPI):
             endpoint = f"lookup/symbol/{species}/{query}"
             return await self._make_request(endpoint)
         except Exception as e:
-            logger.error(f"Ensembl search error: {str(e)}")
+            BioChatLogger.log_error(f"Ensembl search error", e)
             return {"error": str(e)}
     
     async def get_variants(self, chromosome: str, start: int, end: int, 
@@ -754,7 +819,7 @@ class EnsemblAPI(BioDatabaseAPI):
             endpoint = f"overlap/region/{species}/{chromosome}:{start}-{end}/variation"
             return await self._make_request(endpoint)
         except Exception as e:
-            logger.error(f"Variant search error: {str(e)}")
+            BioChatLogger.log_error(f"Variant search error", e)
             return {"error": str(e)}
 
 class GWASCatalog(BioDatabaseAPI):
@@ -770,7 +835,7 @@ class GWASCatalog(BioDatabaseAPI):
             params = {"q": query}
             return await self._make_request("studies/search", params)
         except Exception as e:
-            logger.error(f"GWAS search error: {str(e)}")
+            BioChatLogger.log_error(f"GWAS search error", e)
             return {"error": str(e)}
     
     async def get_associations(self, study_id: str) -> Dict:
@@ -778,7 +843,7 @@ class GWASCatalog(BioDatabaseAPI):
         try:
             return await self._make_request(f"studies/{study_id}/associations")
         except Exception as e:
-            logger.error(f"GWAS associations error: {str(e)}")
+            BioChatLogger.log_error(f"GWAS associations error", e)
             return {"error": str(e)}
 
 # In APIHub.py - Updated UniProtAPI class
@@ -810,7 +875,7 @@ class UniProtAPI(BioDatabaseAPI):
                 }
             return {'results': []}
         except Exception as e:
-            logger.error(f"UniProt search error: {str(e)}")
+            BioChatLogger.log_error(f"UniProt search error", e)
             return {"error": str(e)}
     
     async def get_protein_features(self, uniprot_id: str) -> Dict:
@@ -819,7 +884,7 @@ class UniProtAPI(BioDatabaseAPI):
             response = await self._make_request(f"uniprotkb/{uniprot_id}")
             return response
         except Exception as e:
-            logger.error(f"Protein features error: {str(e)}")
+            BioChatLogger.log_error(f"Protein features error", e)
             return {"error": str(e)}
 
 
