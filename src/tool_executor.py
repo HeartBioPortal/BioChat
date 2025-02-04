@@ -2,6 +2,7 @@ from typing import Dict, Any
 from datetime import datetime
 import json
 import logging
+from src.utils.biochat_api_logging import BioChatLogger
 from src.APIHub import (
     NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI,
     StringDBClient, ReactomeClient, PharmGKBClient,
@@ -40,7 +41,7 @@ class ToolExecutor:
             self.biogrid = BioGridClient(access_key=biogrid_access_key) if biogrid_access_key else None
             self.open_targets = OpenTargetsClient()
 
-            logger.info("Tool executor initialized successfully")
+            BioChatLogger.log_info("Tool executor initialized successfully")
             
         except Exception as e:
             logger.error(f"Failed to initialize tool executor: {str(e)}", exc_info=True)
@@ -52,7 +53,7 @@ class ToolExecutor:
             function_name = tool_call.function.name
             arguments = json.loads(tool_call.function.arguments)
             
-            logger.info(f"Executing tool: {function_name}")
+            BioChatLogger.log_info(f"Executing tool: {function_name}")
             
             handlers = {
                 "search_literature": self._execute_literature_search,
@@ -255,66 +256,49 @@ class ToolExecutor:
 
     async def _execute_pathway_analysis(self, arguments: Dict) -> Dict:
         """Execute pathway analysis using Reactome"""
-        try:
-            params = PathwayAnalysisParams(**arguments)
-            results = {}
-            
-            if params.genes:
-                logger.info(f"Analyzing pathways for genes: {params.genes}")
-                for gene in params.genes:
-                    try:
-                        # Get pathways for gene
-                        logger.info(f"Getting pathways for gene: {gene}")
-                        pathways = await self.reactome.get_pathways_for_gene(gene)
-                        
-                        if isinstance(pathways, dict) and "error" in pathways:
-                            logger.warning(f"Could not get pathways for gene {gene}: {pathways['error']}")
-                            results[gene] = {
-                                "status": "error",
-                                "message": pathways['error']
-                            }
-                            continue
-                            
-                        if pathways:
-                            results[gene] = {
-                                "status": "success",
-                                "pathways": pathways,
-                                "evidence_strength": "high/medium/low",
-                                "source": "Reactome Database",
-                                "last_updated": datetime.now().isoformat()
-                            }
-                            
-                            if params.include_participants and "pathways" in pathways:
-                                pathway_details = []
-                                for pathway in pathways["pathways"][:5]:
-                                    try:
-                                        details = await self.reactome.get_pathway_details(pathway["stId"])
-                                        if params.include_hierarchy:
-                                            hierarchy = await self.reactome.get_pathway_hierarchy(pathway["stId"])
-                                            details["hierarchy"] = hierarchy
-                                        pathway_details.append(details)
-                                    except Exception as e:
-                                        logger.warning(f"Error getting details for pathway {pathway['stId']}: {str(e)}")
-                                        continue
-                                results[gene]["pathway_details"] = pathway_details
-                        else:
-                            results[gene] = {
-                                "status": "no_data",
-                                "message": "No pathways found"
-                            }
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing gene {gene}: {str(e)}")
+
+        params = PathwayAnalysisParams(**arguments)
+        results = {}
+        
+        if params.genes:
+            BioChatLogger.log_info(f"Analyzing pathways for genes: {params.genes}")
+            for gene in params.genes:
+                try:
+                    # Get pathways for gene
+                    BioChatLogger.log_info(f"Getting pathways for gene: {gene}")
+                    pathways = await self.reactome.get_pathways_for_gene(gene)
+                    
+                    if isinstance(pathways, dict) and "error" in pathways:
+                        logger.warning(f"Could not get pathways for gene {gene}: {pathways['error']}")
                         results[gene] = {
                             "status": "error",
-                            "message": str(e)
+                            "message": pathways['error']
                         }
+                        continue
+                        
+                    if pathways:
+                        results[gene] = {
+                            "status": "success",
+                            "pathways": pathways,
+                            "evidence_strength": "high/medium/low",
+                            "source": "Reactome Database",
+                            "last_updated": datetime.now().isoformat()
+                        }
+                        
+                    else:
+                        results[gene] = {
+                            "status": "no_data",
+                            "message": "No pathways found"
+                        }
+                        
+                except Exception as e:
+                    logger.error(f"Error processing gene {gene}: {str(e)}")
+                    results[gene] = {
+                        "status": "error",
+                        "message": str(e)
+                    }
             
             return results
-
-        except Exception as e:
-            logger.error(f"Pathway analysis error: {str(e)}")
-            return {"error": f"Pathway analysis failed: {str(e)}"}
 
     async def _execute_target_analysis(self, arguments: Dict) -> Dict:
             """Execute comprehensive target analysis using Open Targets"""
