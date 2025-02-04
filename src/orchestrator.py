@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 import json
 from openai import AsyncOpenAI
+from src.utils.biochat_api_logging import BioChatLogger
 from src.schemas import BIOCHAT_TOOLS
 from src.tool_executor import ToolExecutor
 import logging
@@ -27,95 +28,93 @@ class BioChatOrchestrator:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
 
-    async def process_query(self, user_query: str) -> str:
-        """Process a user query through the ChatGPT model and execute necessary database queries"""
+    async def process_query(self, user_query: str) -> dict:
+        """Process a user query and return both structured JSON and ChatGPT’s synthesis."""
         try:
-
-            # Original process_query logic for simple queries...
             self.conversation_history.append({"role": "user", "content": user_query})
-            
+
             messages = [
                 {"role": "system", "content": self._create_system_message()},
                 *self.conversation_history
             ]
 
-            try:
-                initial_completion = await self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    tools=BIOCHAT_TOOLS,
-                    tool_choice="auto",
-                    # max_completion_tokens=10000 
-                )
+            # Step 1: Initial request to ChatGPT
+            initial_completion = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=BIOCHAT_TOOLS,
+                tool_choice="auto"
+            )
 
-                initial_message = initial_completion.choices[0].message
-            except:
-                raise
+            initial_message = initial_completion.choices[0].message
 
-            # Handle tool calls if present
+            # Step 2: Collect API responses
+            api_responses = {}
+
             if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
-                # Add assistant's message with tool calls to conversation history
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": initial_message.content,
-                    "tool_calls": [
-                        {
-                            "id": tool_call.id,
-                            "function": {
-                                "name": tool_call.function.name,
-                                "arguments": tool_call.function.arguments
-                            },
-                            "type": "function"
-                        }
-                        for tool_call in initial_message.tool_calls
-                    ]
-                })
-
-                # Execute each tool call
+                tool_call_responses = []
                 for tool_call in initial_message.tool_calls:
                     try:
                         function_response = await self.tool_executor.execute_tool(tool_call)
-                        logger.info(f"Tool response: {function_response}")
-                        self.conversation_history.append({
+                        tool_call_responses.append({
                             "role": "tool",
                             "content": json.dumps(function_response),
                             "tool_call_id": tool_call.id
                         })
                     except Exception as e:
-                        logger.error(f"Tool execution error: {str(e)}", exc_info=True)
-                        # Add error message as tool response
-                        self.conversation_history.append({
+                        tool_call_responses.append({
                             "role": "tool",
                             "content": json.dumps({"error": str(e)}),
                             "tool_call_id": tool_call.id
                         })
-
-                # Get final response with updated conversation history
-                messages = [
-                    {"role": "system", "content": self._create_system_message()},
-                    *self.conversation_history
-                ]
                 
-                final_completion = await self.client.chat.completions.create(
-                    model="gpt-4o",  # Fixed model name
-                    messages=messages
-                )
+                # ✅ Append tool responses only if there was a valid tool call
+                if tool_call_responses:
+                    self.conversation_history.extend(tool_call_responses)
 
-                final_message = final_completion.choices[0].message.content
-                self.conversation_history.append({"role": "assistant", "content": final_message})
-                return final_message
 
-            else:
-                # Handle case where no tool calls are made
-                direct_response = initial_message.content or "I apologize, but I couldn't generate a response. Please try rephrasing your question."
-                self.conversation_history.append({"role": "assistant", "content": direct_response})
-                return direct_response
+            # Step 3: Convert API responses to structured JSON format
+            structured_response = {
+                "query": user_query,
+                "synthesis": "",  # Will be filled after ChatGPT processes it
+                "structured_data": api_responses  # Stores API results in JSON format
+            }
+
+            # Step 4: Format API results into a system prompt for ChatGPT
+            scientific_context = "**🔬 API Results:**\n\n"
+            for tool_name, result in api_responses.items():
+                scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)[:1000]}...\n\n"
+
+            # Step 5: Augment conversation history with API data
+            messages = [
+                {"role": "system", "content": self._create_system_message()},
+                {"role": "system", "content": scientific_context},  # Include structured API results
+                *self.conversation_history
+            ]
+
+            # Step 6: Generate final ChatGPT synthesis
+            final_completion = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages
+            )
+
+            structured_response["synthesis"] = final_completion.choices[0].message.content
+            self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
+
+            return structured_response  # ✅ Returns both JSON and ChatGPT synthesis
 
         except Exception as e:
-            logger.error(f"Query processing error: {str(e)}", exc_info=True)
-            error_message = f"An error occurred: {str(e)}"
-            self.conversation_history.append({"role": "assistant", "content": error_message})
-            return error_message
+            return {
+                "query": user_query,
+                "error": str(e),
+                "structured_data": {}
+            }
+
+
+        except Exception as e:
+            self.conversation_history.append({"role": "assistant", "content": f"An error occurred: {str(e)}"})
+            return f"An error occurred: {str(e)}"
+
 
     async def process_single_gene_query(self, query: str) -> str:
         """Process a query about a single gene"""
@@ -145,34 +144,82 @@ class BioChatOrchestrator:
 
     def _create_system_message(self) -> str:
         """Create the system message that guides the model's behavior"""
-        return """You are BioChat, an AI assistant specialized in biological and medical research. Your role is to:
-        1. Always cite sources with database names and timestamps
-2. Understand user queries about biological/medical topics
-3. Use the appropriate database APIs to fetch relevant information
-4. Synthesize and explain the information in a clear, scientific manner
-5. give precise citations based on the API's you use for any information you provide
+        return """
 
-Always aim to provide accurate, up-to-date scientific information with appropriate citations.
-When using tools, analyze the results carefully and provide comprehensive, well-structured responses.
+You are BioChat, a specialized AI assistant for biological and medical research, with a focus on drug discovery applications. Your primary directive is to provide comprehensive, research-grade information by leveraging multiple biological databases and APIs.
 
-    6. Organize evidence hierarchically:
-       - Direct molecular evidence
-       - Pathway involvement
-       - Literature support
-       - Clinical associations
-    7. Rate confidence levels:
-       - High: Multiple independent sources
-       - Medium: Limited but consistent evidence
-       - Low: Preliminary or conflicting data
-    8. Present findings in sections:
-       - Summary
-       - Molecular Mechanisms
-       - Clinical Relevance
-       - Supporting Evidence
+## Core Functions
 
-       Also please utilize all the API tools available to you to provide the most accurate information possible. And this is very important
-       I want you to ues most of the data you get from APIs eve nif you were to cite them literally. This response is going to be used by
-       researchers for drug discovery so please provide as much information as possible.
+1. Database Integration
+- Systematically query ALL available biological databases and APIs for each request
+- Cross-reference information across multiple databases to ensure completeness
+- Track and log all API calls with timestamps and response metadata
+- Prioritize most recent data sources when available
+
+2. Data Analysis & Synthesis
+- Process raw API responses in full detail, including metadata and supplementary information
+- Analyze statistical significance and experimental conditions where available
+- Compare conflicting data points across different sources
+- Identify gaps in available information
+
+3. Output Structure
+For each response, provide:
+
+a) Executive Summary
+- Key findings and relevance to query
+- Confidence levels in data
+- Notable limitations or caveats
+
+b) Detailed Analysis
+- Comprehensive breakdown of all API data
+- Molecular structures and pathways
+- Interaction networks
+- Experimental contexts
+- Statistical analyses
+- Raw data tables where relevant
+
+c) Clinical/Research Applications
+- Drug development implications
+- Structure-activity relationships
+- Known drug interactions
+- Safety considerations
+- Research opportunities
+
+4. Citation & Documentation
+- Include full database citations with:
+  * Database name and version
+  * Query parameters used
+  * Timestamp of data retrieval
+  * DOI/accession numbers
+  * API endpoint documentation
+  * Data update frequencies
+- Generate structured bibliography in multiple formats (APA, Vancouver, etc.)
+- Provide API response logs for validation
+
+5. Quality Control
+- Validate data consistency across sources
+- Flag conflicting information
+- Highlight data quality metrics
+- Note experimental conditions and limitations
+- Indicate confidence levels in conclusions
+
+6. Additional Requirements
+- Return complete API response data, including supplementary fields
+- Include negative results and null findings
+- Maintain version control of information
+- Track data provenance
+- Note any real-time updates or corrections
+
+For drug discovery applications:
+- Emphasize ADMET properties
+- Detail binding affinities
+- Include crystal structures when available
+- List known analogs and derivatives
+- Provide synthesis routes
+- Document safety profiles
+- Note regulatory status
+- Include pharmacokinetic data
+- Report drug-drug interactions
 
 """
 
