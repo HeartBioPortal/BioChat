@@ -2,6 +2,7 @@ import pytest
 import os
 import logging
 from dotenv import load_dotenv
+from src.utils.biochat_api_logging import BioChatLogger
 from src.orchestrator import BioChatOrchestrator
 from datetime import datetime
 import asyncio
@@ -29,15 +30,15 @@ logger = logging.getLogger(__name__)
 
 def log_conversation(test_name: str, query: str, response: str):
     """Log the conversation exchange with clear formatting"""
-    logger.info(f"\n{'='*80}\nTest: {test_name}\n{'='*80}")
-    logger.info(f"Query: {query}")
-    logger.info(f"Response: {response}")
-    logger.info(f"{'='*80}\n")
+    BioChatLogger.log_info(f"\n{'='*80}\nTest: {test_name}\n{'='*80}")
+    BioChatLogger.log_info(f"Query: {query}")
+    BioChatLogger.log_info(f"Response: {response}")
+    BioChatLogger.log_info(f"{'='*80}\n")
 
 @pytest.fixture(scope="session")
 def integration_orchestrator():
     """Create a shared orchestrator instance for integration tests"""
-    logger.info("Initializing integration test orchestrator")
+    BioChatLogger.log_info("Initializing integration test orchestrator")
     load_dotenv(".env.integration")
     
     orchestrator = BioChatOrchestrator(
@@ -48,7 +49,7 @@ def integration_orchestrator():
         email=os.getenv("CONTACT_EMAIL")
     )
     
-    logger.info("Orchestrator initialized successfully")
+    BioChatLogger.log_info("Orchestrator initialized successfully")
     return orchestrator
 
 @pytest.fixture(autouse=True)
