@@ -51,7 +51,7 @@ class BioChatOrchestrator:
             # Step 2: Collect API responses
             api_responses = {}
 
-            if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
+            if initial_message.tool_calls:  # ✅ Ensure `tool_calls` is NOT empty
                 tool_call_responses = []
                 for tool_call in initial_message.tool_calls:
                     try:
@@ -67,11 +67,9 @@ class BioChatOrchestrator:
                             "content": json.dumps({"error": str(e)}),
                             "tool_call_id": tool_call.id
                         })
-                
-                # ✅ Append tool responses only if there was a valid tool call
+
                 if tool_call_responses:
                     self.conversation_history.extend(tool_call_responses)
-
 
             # Step 3: Convert API responses to structured JSON format
             structured_response = {
@@ -83,14 +81,21 @@ class BioChatOrchestrator:
             # Step 4: Format API results into a system prompt for ChatGPT
             scientific_context = "**🔬 API Results:**\n\n"
             for tool_name, result in api_responses.items():
-                scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)[:1000]}...\n\n"
-
+                if tool_name == "get_biogrid_interactions":
+                        scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
+                        scientific_context += json.dumps(result["top_interactions"], indent=4) + "...\n\n"
+                        scientific_context += f"📂 Full data available at: {result['download_url']}\n\n"
+                else:
+                    scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}...\n\n"
+                    
             # Step 5: Augment conversation history with API data
             messages = [
                 {"role": "system", "content": self._create_system_message()},
                 {"role": "system", "content": scientific_context},  # Include structured API results
                 *self.conversation_history
             ]
+            # 🚨 Remove empty tool messages to prevent OpenAI API errors
+            messages = [msg for msg in messages if msg.get("role") != "tool" or "tool_call_id" in msg]
 
             # Step 6: Generate final ChatGPT synthesis
             final_completion = await self.client.chat.completions.create(
