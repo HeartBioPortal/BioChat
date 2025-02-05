@@ -103,17 +103,39 @@ class ToolExecutor:
             return {"error": str(e)}
 
     async def _execute_biogrid_interactions(self, arguments: Dict) -> Dict:
-        """Execute BioGRID interaction analysis"""
+        """Execute BioGRID interaction analysis with optimized filtering."""
         try:
             params = BioGridInteractionParams(**arguments)
-            return await self.biogrid.get_core_interactions(
+            raw_results = await self.biogrid.get_core_interactions(
                 gene_list=params.gene_list,
                 include_interactors=params.include_interactors,
                 tax_id=params.tax_id
             )
+
+            # ✅ Keep only interactions related to queried genes with highest confidence scores
+            relevant_interactions = sorted(
+                [entry for entry in raw_results if entry.get("score", 0) > 0.7], 
+                key=lambda x: x["score"], 
+                reverse=True
+            )[:10]  # Limit to top 10 interactions
+
+            # ✅ Save full API response in a temp file for download
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            temp_filepath = f"/tmp/biogrid_response_{timestamp}.json"
+            with open(temp_filepath, "w") as temp_file:
+                json.dump(raw_results, temp_file)
+
+            logger.info(f"Full BioGRID API response saved to {temp_filepath}")
+
+            return {
+                "top_interactions": relevant_interactions,
+                "download_url": temp_filepath  # Provide a link for users to download full data
+            }
+
         except Exception as e:
             logger.error(f"BioGRID interaction error: {str(e)}")
             return {"error": str(e)}
+
 
     async def _execute_biogrid_chemical_interactions(self, arguments: Dict) -> Dict:
         """Execute BioGRID chemical interaction analysis"""
