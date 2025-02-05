@@ -6,7 +6,8 @@ from src.utils.biochat_api_logging import BioChatLogger
 from src.orchestrator import BioChatOrchestrator
 from datetime import datetime
 import asyncio
-
+from typing import Dict, List
+import json
 
 
 @pytest.fixture(scope="session")
@@ -28,12 +29,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def log_conversation(test_name: str, query: str, response: str):
-    """Log the conversation exchange with clear formatting"""
-    BioChatLogger.log_info(f"\n{'='*80}\nTest: {test_name}\n{'='*80}")
-    BioChatLogger.log_info(f"Query: {query}")
-    BioChatLogger.log_info(f"Response: {response}")
-    BioChatLogger.log_info(f"{'='*80}\n")
+def log_conversation(test_name: str, query: str, response: Dict, conversation_history: List[Dict]):
+    """Log query response but limit the size of logged BioGRID responses."""
+    logger.info(f"\n{'='*80}\nTest: {test_name}\n{'='*80}")
+    logger.info(f"Query: {query}")
+
+    # ✅ Limit BioGRID log output
+    if "top_interactions" in response:
+        logger.info(f"Top BioGRID Interactions: {json.dumps(response['top_interactions'], indent=4)[:1000]}...")
+        logger.info(f"Full BioGRID API response saved to: {response['download_url']}")
+    else:
+        logger.info(f"Response: {response}")
+
+    logger.info(f"{'='*80}\n")
+
 
 @pytest.fixture(scope="session")
 def integration_orchestrator():
