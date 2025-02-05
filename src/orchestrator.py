@@ -28,8 +28,8 @@ class BioChatOrchestrator:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
 
-    async def process_query(self, user_query: str) -> dict:
-        """Process a user query and return both structured JSON and ChatGPT’s synthesis."""
+    async def process_query(self, user_query: str) -> str:
+        """Process a user query and return GPT synthesis as a string."""
         try:
             self.conversation_history.append({"role": "user", "content": user_query})
 
@@ -56,12 +56,17 @@ class BioChatOrchestrator:
                 for tool_call in initial_message.tool_calls:
                     try:
                         function_response = await self.tool_executor.execute_tool(tool_call)
+
+                        # ✅ Store API results properly
+                        api_responses[tool_call.function.name] = function_response  
+
                         tool_call_responses.append({
                             "role": "tool",
                             "content": json.dumps(function_response),
                             "tool_call_id": tool_call.id
                         })
                     except Exception as e:
+                        api_responses[tool_call.function.name] = {"error": str(e)}
                         tool_call_responses.append({
                             "role": "tool",
                             "content": json.dumps({"error": str(e)}),
@@ -79,15 +84,23 @@ class BioChatOrchestrator:
             }
 
             # Step 4: Format API results into a system prompt for ChatGPT
-            scientific_context = "**🔬 API Results:**\n\n"
+            scientific_context = "**🔬 API Results (Filtered & Relevant):**\n\n"
             for tool_name, result in api_responses.items():
-                if tool_name == "get_biogrid_interactions":
-                        scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
-                        scientific_context += json.dumps(result["top_interactions"], indent=4) + "...\n\n"
-                        scientific_context += f"📂 Full data available at: {result['download_url']}\n\n"
+                if tool_name == "get_biogrid_interactions" or tool_name == "get_string_interactions":
+                    scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
+                    scientific_context += json.dumps(result["top_interactions"], indent=4) + "\n\n"
+                    scientific_context += f"📂 Full data available at: {result['download_url']}\n\n"
                 else:
-                    scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}...\n\n"
-                    
+                    scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}\n\n"
+
+            # ✅ Add explicit GPT instructions
+            scientific_context += (
+                "\n🔬 **GPT Instructions:**\n"
+                "- Use the API results to generate a scientific summary.\n"
+                "- Reference API sources explicitly.\n"
+                "- If a tool provided a download link, mention that full data is available."
+            )
+
             # Step 5: Augment conversation history with API data
             messages = [
                 {"role": "system", "content": self._create_system_message()},
@@ -106,19 +119,13 @@ class BioChatOrchestrator:
             structured_response["synthesis"] = final_completion.choices[0].message.content
             self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
 
-            return structured_response  # ✅ Returns both JSON and ChatGPT synthesis
+            # ✅ Return GPT response as a string (fixes test case)
+            return structured_response["synthesis"]
 
         except Exception as e:
-            return {
-                "query": user_query,
-                "error": str(e),
-                "structured_data": {}
-            }
-
-
-        except Exception as e:
-            self.conversation_history.append({"role": "assistant", "content": f"An error occurred: {str(e)}"})
             return f"An error occurred: {str(e)}"
+
+
 
 
     async def process_single_gene_query(self, query: str) -> str:
