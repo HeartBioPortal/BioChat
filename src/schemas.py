@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class LiteratureSearchParams(BaseModel):
     """Parameters for literature search queries"""
@@ -36,15 +36,7 @@ class LiteratureSearchParams(BaseModel):
             raise ValueError("At least one search term must be provided")
         return values
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "genes": ["BRCA1", "BRCA2"],
-                "phenotypes": ["breast cancer"],
-                "additional_terms": ["treatment", "therapy"],
-                "max_results": 5
-            }
-        }
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class VariantSearchParams(BaseModel):
     """Parameters for variant search queries"""
