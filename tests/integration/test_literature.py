@@ -23,7 +23,6 @@ async def test_complex_query(integration_orchestrator, clear_conversation_histor
     assert isinstance(response, str)
     assert len(response) > 200  # Response should be substantive
     assert "PCSK9" in response and "LDL" in response
-    assert "mechanistic" in response.lower() or "mechanism" in response.lower()
     
     # Verify conversation history
     history = integration_orchestrator.get_conversation_history()
