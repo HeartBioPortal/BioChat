@@ -10,12 +10,13 @@ from typing import Dict, List
 import json
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create a session-scoped event loop"""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+@pytest.mark.asyncio(scope="session")  # ✅ Correct way to handle async event loop
+async def event_loop():
+    loop = asyncio.get_event_loop()
     yield loop
     loop.close()
+
 
 
 # Configure logging
