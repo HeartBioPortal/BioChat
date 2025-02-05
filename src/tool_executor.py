@@ -2,6 +2,7 @@ from typing import Dict, Any
 from datetime import datetime
 import json
 import logging
+import os
 from src.utils.biochat_api_logging import BioChatLogger
 from src.APIHub import (
     NCBIEutils, EnsemblAPI, GWASCatalog, UniProtAPI,
@@ -20,6 +21,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+
+API_RESULTS_DIR = "api_results"
+os.makedirs(API_RESULTS_DIR, exist_ok=True)
+
+
 
 class ToolExecutor:
     def __init__(self, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str = None):
@@ -46,6 +53,21 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Failed to initialize tool executor: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
+
+
+
+
+    def save_api_response(self, api_name: str, response: dict) -> str:
+        """Save the full API response to a file and return the file path."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{api_name}_response_{timestamp}.json"
+        filepath = os.path.join(API_RESULTS_DIR, filename)
+        
+        with open(filepath, "w") as file:
+            json.dump(response, file, indent=4)
+        
+        logger.info(f"Full API response for {api_name} saved at {filepath}")
+        return filepath
 
     async def execute_tool(self, tool_call) -> Dict:
         """Execute the appropriate database function based on the tool call"""
@@ -82,25 +104,35 @@ class ToolExecutor:
             return {"error": str(e)}
 
     async def _execute_string_interactions(self, arguments: Dict) -> Dict:
-        """Execute STRING-DB interaction analysis"""
+        """Execute STRING-DB interaction analysis with optimized filtering."""
         try:
             params = StringDBEnrichmentParams(**arguments)
-            results = await self.string_db.get_interaction_partners(
+            raw_results = await self.string_db.get_interaction_partners(
                 identifiers=params.identifiers,
                 species=params.species
             )
-            
-            if params.background_identifiers:
-                enrichment = await self.string_db.get_ppi_enrichment(
-                    identifiers=params.identifiers,
-                    background_identifiers=params.background_identifiers
-                )
-                results["enrichment"] = enrichment
-                
-            return results
+
+            # ✅ Keep only high-confidence interactions (score > 0.8) and limit to top 10
+            relevant_interactions = sorted(
+                [entry for entry in raw_results if entry.get("score", 0) > 0.8], 
+                key=lambda x: x["score"], 
+                reverse=True
+            )[:10]  # Keep only top 10 high-confidence interactions
+
+            # ✅ Save full API response in a temp file for download
+            file_path = self.save_api_response("biogrid", raw_results)
+
+            logger.info(f"Full STRING-DB API response saved to {file_path}")
+
+            return {
+                "top_interactions": relevant_interactions,
+                "download_url": file_path  # Provide a download link for full data
+            }
+
         except Exception as e:
-            logger.error(f"STRING-DB analysis error: {str(e)}")
+            logger.error(f"STRING-DB interaction error: {str(e)}")
             return {"error": str(e)}
+
 
     async def _execute_biogrid_interactions(self, arguments: Dict) -> Dict:
         """Execute BioGRID interaction analysis with optimized filtering."""
@@ -120,16 +152,13 @@ class ToolExecutor:
             )[:10]  # Limit to top 10 interactions
 
             # ✅ Save full API response in a temp file for download
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            temp_filepath = f"/tmp/biogrid_response_{timestamp}.json"
-            with open(temp_filepath, "w") as temp_file:
-                json.dump(raw_results, temp_file)
+            file_path = self.save_api_response("biogrid", raw_results)
 
-            logger.info(f"Full BioGRID API response saved to {temp_filepath}")
+            logger.info(f"Full BioGRID API response saved to {file_path}")
 
             return {
                 "top_interactions": relevant_interactions,
-                "download_url": temp_filepath  # Provide a link for users to download full data
+                "download_url": file_path  # Provide a link for users to download full data
             }
 
         except Exception as e:
