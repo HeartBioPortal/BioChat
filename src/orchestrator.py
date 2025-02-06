@@ -5,8 +5,15 @@ from src.utils.biochat_api_logging import BioChatLogger
 from src.schemas import BIOCHAT_TOOLS
 from src.tool_executor import ToolExecutor
 import logging
+import os
+from datetime import datetime
+
+
 
 logger = logging.getLogger(__name__)
+API_RESULTS_DIR = "api_results"
+os.makedirs(API_RESULTS_DIR, exist_ok=True)
+
 
 class BioChatOrchestrator:
     def __init__(self, openai_api_key: str, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str = None):
@@ -27,6 +34,18 @@ class BioChatOrchestrator:
         except Exception as e:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
+
+    def save_gpt_response(self, query: str, response: str) -> str:
+        """Save the final GPT response to a file and return the file path."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"gpt_response_{timestamp}.json"
+        filepath = os.path.join(API_RESULTS_DIR, filename)
+        
+        with open(filepath, "w") as file:
+            json.dump({"query": query, "response": response}, file, indent=4)
+        
+        logger.info(f"Final GPT response saved at {filepath}")
+        return filepath
 
     async def process_query(self, user_query: str) -> str:
         """Process a user query and return GPT synthesis as a string."""
@@ -51,7 +70,7 @@ class BioChatOrchestrator:
             # Step 2: Collect API responses
             api_responses = {}
 
-            if initial_message.tool_calls:  # ✅ Ensure `tool_calls` is NOT empty
+            if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
                 tool_call_responses = []
                 for tool_call in initial_message.tool_calls:
                     try:
@@ -75,6 +94,7 @@ class BioChatOrchestrator:
 
                 if tool_call_responses:
                     self.conversation_history.extend(tool_call_responses)
+
 
             # Step 3: Convert API responses to structured JSON format
             structured_response = {
@@ -119,11 +139,16 @@ class BioChatOrchestrator:
             structured_response["synthesis"] = final_completion.choices[0].message.content
             self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
 
+            gpt_response_path = self.save_gpt_response(user_query, structured_response["synthesis"])
+            logger.info(f"GPT response saved at: {gpt_response_path}")
+
             # ✅ Return GPT response as a string (fixes test case)
             return structured_response["synthesis"]
 
         except Exception as e:
-            return f"An error occurred: {str(e)}"
+            error_message = f"An error occurred: {str(e)}"
+            return error_message
+
 
 
 
