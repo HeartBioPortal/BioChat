@@ -18,9 +18,13 @@ from src.schemas import (
 # Configure logger
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler("biochat_api.log", mode="a"),  # ✅ Ensure the log file stays open
+                logging.StreamHandler()
+            ]
+        )
 
 
 API_RESULTS_DIR = "api_results"
@@ -120,7 +124,7 @@ class ToolExecutor:
             )[:10]  # Keep only top 10 high-confidence interactions
 
             # ✅ Save full API response in a temp file for download
-            file_path = self.save_api_response("biogrid", raw_results)
+            file_path = self.save_api_response("stringdb", raw_results)
 
             logger.info(f"Full STRING-DB API response saved to {file_path}")
 
@@ -236,6 +240,10 @@ class ToolExecutor:
                 "database_version": "2024",
                 "citation_format": "PMID: [id]"
             }
+
+            # ✅ Save full API response in a temp file for download
+            file_path = self.save_api_response("pubmed", results)
+
             return results
         except Exception as e:
             logger.error(f"Literature search error: {str(e)}", exc_info=True)
@@ -263,6 +271,8 @@ class ToolExecutor:
             if params.gene:
                 results = {k: v for k, v in results.items() 
                           if params.gene.upper() in str(v.get('mapped_genes', '')).upper()}
+            
+            file_path = self.save_api_response("gwas", results)
             return results
         except Exception as e:
 
@@ -299,6 +309,7 @@ class ToolExecutor:
                     logger.warning(f"Failed to get protein features: {str(e)}")
                     response["features_error"] = str(e)
 
+            file_path = self.save_api_response("uniprot", response)
             return response
 
         except Exception as e:
