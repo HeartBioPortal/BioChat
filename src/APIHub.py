@@ -60,43 +60,46 @@ class BioDatabaseAPI(ABC):
             await self.session.close()
             self.session = None
     
+
     async def _make_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> Dict:
-        """Enhanced request method with better error handling"""
+        """Enhanced request method with SSL verification handling."""
         max_retries = 3
         retry_delay = 1
-        
+
+        session_created = False  
+        ssl_context = ssl.create_default_context()  # ✅ Create a secure SSL context
+
         for attempt in range(max_retries):
             try:
-                await self._init_session()
-                await asyncio.sleep(delay)
+                if not hasattr(self, "session") or self.session is None or self.session.closed:
+                    self.session = aiohttp.ClientSession()
+                    session_created = True  
                 
+                await asyncio.sleep(delay)
                 url = f"{self.base_url}/{endpoint}"
-                async with self.session.get(url, headers=self.headers, params=params) as response:
+
+                async with self.session.get(url, headers=self.headers, params=params, ssl=ssl_context) as response:
                     if response.status == 429:  # Rate limit
                         retry_after = int(response.headers.get('Retry-After', retry_delay))
                         await asyncio.sleep(retry_after)
                         continue
                     response.raise_for_status()
-                    response_text = await response.text()
-                    try:
-                        if "application/json" in response.headers.get("Content-Type", "") or "text/json" in response.headers.get("Content-Type", ""):
-                            return json.loads(response_text)  # Use json.loads() instead of response.json()
-                        else:
-                            BioChatLogger.log_error("Unexpected response format", Exception(f"Headers: {response.headers}"))
-                            return None
-                    except json.JSONDecodeError:
-                        BioChatLogger.log_error("Failed to decode JSON", Exception(response_text[:500]))
-                        return None
+                    return await response.json()
                     
             except aiohttp.ClientError as e:
                 BioChatLogger.log_error(f"API request error", e)
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(retry_delay * (attempt + 1))
-                
+                    
             except Exception as e:
                 BioChatLogger.log_error(f"Unexpected error in API request", e)
                 raise
+
+            finally:
+                if session_created and self.session and not self.session.closed:
+                    await self.session.close()
+
 
     async def __aenter__(self):
         await self._init_session()
@@ -316,7 +319,7 @@ class StringDBClient(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://string-db.org/api"  # Updated base URL
         self.caller_identity = caller_identity
-        self.headers = {"Content-Type": "text/json"}
+        # self.headers = {"Content-Type": "text/json"}
 
     async def search(self, query: str) -> Dict:
         """Implement the abstract search method for STRING-DB"""
