@@ -12,12 +12,12 @@ async def test_complex_query(integration_orchestrator, clear_conversation_histor
     response = await integration_orchestrator.process_query(query)
     
     # Log the complete conversation
-    test_logger.log_conversation(
-        test_name="Complex and technical Query",
-        query=query,
-        response=response,
-        conversation_history=integration_orchestrator.get_conversation_history()
-    )
+    # test_logger.log_conversation(
+    #     test_name="Complex and technical Query",
+    #     query=query,
+    #     response=response,
+    #     conversation_history=integration_orchestrator.get_conversation_history()
+    # )
     
     # Verify response structure and content
     assert isinstance(response, str)
