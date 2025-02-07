@@ -49,107 +49,108 @@ class BioChatOrchestrator:
 
     async def process_query(self, user_query: str) -> str:
         """Process a user query and return GPT synthesis as a string."""
-        try:
-            self.conversation_history.append({"role": "user", "content": user_query})
 
-            messages = [
-                {"role": "system", "content": self._create_system_message()},
-                *self.conversation_history
-            ]
+        self.conversation_history.append({"role": "user", "content": user_query})
 
-            # Step 1: Initial request to ChatGPT
-            initial_completion = await self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                tools=BIOCHAT_TOOLS,
-                tool_choice="auto"
-            )
+        messages = [
+            {"role": "system", "content": self._create_system_message()},
+            *self.conversation_history
+        ]
 
-            initial_message = initial_completion.choices[0].message
+        # Step 1: Initial request to ChatGPT
+        initial_completion = await self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=BIOCHAT_TOOLS,
+            tool_choice="auto"
+        )
 
-            # Step 2: Collect API responses
-            api_responses = {}
+        initial_message = initial_completion.choices[0].message
 
-            if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
-                tool_call_responses = []
-                for tool_call in initial_message.tool_calls:
-                    try:
-                        function_response = await self.tool_executor.execute_tool(tool_call)
+        # Step 2: Collect API responses
+        api_responses = {}
 
-                        # ✅ Store API results properly
-                        api_responses[tool_call.function.name] = function_response  
+        if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
+            # First add the assistant's message with tool calls
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": initial_message.content,
+                "tool_calls": [
+                    {
+                        "id": tool_call.id,
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments
+                        },
+                        "type": "function"
+                    }
+                    for tool_call in initial_message.tool_calls
+                ]
+            })
 
-                        tool_call_responses.append({
-                            "role": "tool",
-                            "content": json.dumps(function_response),
-                            "tool_call_id": tool_call.id
-                        })
-                    except Exception as e:
-                        api_responses[tool_call.function.name] = {"error": str(e)}
-                        tool_call_responses.append({
-                            "role": "tool",
-                            "content": json.dumps({"error": str(e)}),
-                            "tool_call_id": tool_call.id
-                        })
+            # Then handle each tool call
+            for tool_call in initial_message.tool_calls:
+                try:
+                    function_response = await self.tool_executor.execute_tool(tool_call)
+                    api_responses[tool_call.function.name] = function_response
+                    
+                    self.conversation_history.append({
+                        "role": "tool",
+                        "content": json.dumps(function_response),
+                        "tool_call_id": tool_call.id
+                    })
+                except Exception as e:
+                    api_responses[tool_call.function.name] = {"error": str(e)}
+                    self.conversation_history.append({
+                        "role": "tool",
+                        "content": json.dumps({"error": str(e)}),
+                        "tool_call_id": tool_call.id
+                    })
 
-                if tool_call_responses:
-                    self.conversation_history.extend(tool_call_responses)
+        # Step 3: Convert API responses to structured JSON format
+        structured_response = {
+            "query": user_query,
+            "synthesis": "",  # Will be filled after ChatGPT processes it
+            "structured_data": api_responses  # Stores API results in JSON format
+        }
 
+        # Step 4: Format API results into a system prompt for ChatGPT
+        scientific_context = "**🔬 API Results (Filtered & Relevant):**\n\n"
+        for tool_name, result in api_responses.items():
+            if tool_name == "get_biogrid_interactions" or tool_name == "get_string_interactions":
+                scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
+                scientific_context += json.dumps(result.get("top_interactions"), indent=4) + "\n\n"
+                scientific_context += f"📂 Full data available at: {result.get('download_url')}\n\n"
+            else:
+                scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}\n\n"
 
-            # Step 3: Convert API responses to structured JSON format
-            structured_response = {
-                "query": user_query,
-                "synthesis": "",  # Will be filled after ChatGPT processes it
-                "structured_data": api_responses  # Stores API results in JSON format
-            }
+        scientific_context += (
+            "\n🔬 **GPT Instructions:**\n"
+            "- Use the API results to generate a scientific summary.\n"
+            "- Reference API sources explicitly.\n"
+            "- If a tool provided a download link, mention that full data is available."
+        )
 
-            # Step 4: Format API results into a system prompt for ChatGPT
-            scientific_context = "**🔬 API Results (Filtered & Relevant):**\n\n"
-            for tool_name, result in api_responses.items():
-                if tool_name == "get_biogrid_interactions" or tool_name == "get_string_interactions":
-                    scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
-                    scientific_context += json.dumps(result["top_interactions"], indent=4) + "\n\n"
-                    scientific_context += f"📂 Full data available at: {result['download_url']}\n\n"
-                else:
-                    scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}\n\n"
+        # Step 5: Augment conversation history with API data
+        messages = [
+            {"role": "system", "content": self._create_system_message()},
+            {"role": "system", "content": scientific_context},  # Include structured API results
+            *self.conversation_history
+        ]
 
-            # ✅ Add explicit GPT instructions
-            scientific_context += (
-                "\n🔬 **GPT Instructions:**\n"
-                "- Use the API results to generate a scientific summary.\n"
-                "- Reference API sources explicitly.\n"
-                "- If a tool provided a download link, mention that full data is available."
-            )
+        # Step 6: Generate final ChatGPT synthesis
+        final_completion = await self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
 
-            # Step 5: Augment conversation history with API data
-            messages = [
-                {"role": "system", "content": self._create_system_message()},
-                {"role": "system", "content": scientific_context},  # Include structured API results
-                *self.conversation_history
-            ]
-            # 🚨 Remove empty tool messages to prevent OpenAI API errors
-            messages = [msg for msg in messages if msg.get("role") != "tool" or "tool_call_id" in msg]
+        structured_response["synthesis"] = final_completion.choices[0].message.content
+        self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
 
-            # Step 6: Generate final ChatGPT synthesis
-            final_completion = await self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages
-            )
+        gpt_response_path = self.save_gpt_response(user_query, structured_response["synthesis"])
+        logger.info(f"GPT response saved at: {gpt_response_path}")
 
-            structured_response["synthesis"] = final_completion.choices[0].message.content
-            self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
-
-            gpt_response_path = self.save_gpt_response(user_query, structured_response["synthesis"])
-            logger.info(f"GPT response saved at: {gpt_response_path}")
-
-            # ✅ Return GPT response as a string (fixes test case)
-            return structured_response["synthesis"]
-
-        except Exception as e:
-            error_message = f"An error occurred: {str(e)}"
-            return error_message
-
-
+        return structured_response["synthesis"]
 
 
 
