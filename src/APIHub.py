@@ -84,7 +84,12 @@ class BioDatabaseAPI(ABC):
                         await asyncio.sleep(retry_after)
                         continue
                     response.raise_for_status()
-                    return await response.json()
+                    response_text = await response.text()
+                    try:
+                        return json.loads(response_text)
+                    except json.JSONDecodeError:
+                        BioChatLogger.log_error("Failed to decode STRING-DB response", Exception(response_text[:500]))
+                        return None
                     
             except aiohttp.ClientError as e:
                 BioChatLogger.log_error(f"API request error", e)
@@ -319,7 +324,7 @@ class StringDBClient(BioDatabaseAPI):
         super().__init__()
         self.base_url = "https://string-db.org/api"  # Updated base URL
         self.caller_identity = caller_identity
-        # self.headers = {"Content-Type": "text/json"}
+        self.headers = {"Content-Type": "text/json"}
 
     async def search(self, query: str) -> Dict:
         """Implement the abstract search method for STRING-DB"""
