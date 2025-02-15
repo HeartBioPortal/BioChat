@@ -3,7 +3,7 @@ Module for accessing various bioinformatics database APIs.
 Includes NCBI E-utilities, Ensembl, GWAS Catalog, UniProt, STRING, Reactome, IntAct, PharmGKB, and BioGRID.
 """
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from abc import ABC, abstractmethod
 import json
 import xml.etree.ElementTree as ET
@@ -606,83 +606,123 @@ class IntActClient(BioDatabaseAPI):
             
         return await self._make_request("findInteractionFacets", params)
 
+
 class PharmGKBClient(BioDatabaseAPI):
+    """
+    A PharmGKB API client that provides useful endpoints for analyzing drugs/chemicals
+    and pathways.
+    """
     def __init__(self):
         super().__init__()
-        self.base_url = "https://api.pharmgkb.org/v1/data"
-
-    async def search(self, query: str) -> Dict:
-        """Implement the abstract search method for PharmGKB"""
-        try:
-            # Use general search endpoint with query
-            params = {
-                "q": query,
-                "view": "base"  # Basic view level
-            }
-            return await self._make_request("search", params)
-        except Exception as e:
-            BioChatLogger.log_error(f"PharmGKB search error", e)
-            return {"error": str(e)}
+        self.base_url = "https://api.pharmgkb.org/v1"
+    
+    # -------------------
+    # Chemical (Drug) APIs
+    # -------------------
+    async def search_chemical(self, name: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Search for Chemical objects by name.
+        This can help you identify the correct PharmGKB ID when multiple synonyms exist.
         
-    async def get_clinical_annotations(self, 
-                                    drug_id: Optional[str] = None,
-                                    gene_id: Optional[str] = None) -> Dict:
-        """Get drug-gene clinical associations"""
-        params = {}
-        if drug_id:
-            params["drugId"] = drug_id
-        if gene_id:
-            params["geneId"] = gene_id
-            
-        return await self._make_request("clinicalAnnotation", params)
+        Endpoint: GET /data/chemical
+        
+        Query Parameters:
+          - name: The chemical (drug) name (may match multiple synonyms)
+          - view: (optional) one of "min", "base", "max"
+        """
+        params = {"name": name, "view": view}
+        return await self._make_request("data/chemical", params)
+    
+    async def get_chemical(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Retrieve a Chemical object by its PharmGKB ID.
+        
+        Endpoint: GET /data/chemical/{id}
+        """
+        endpoint = f"data/chemical/{pharmgkb_id}"
+        params = {"view": view} if view else {}
+        return await self._make_request(endpoint, params)
+    
+    async def search_drug_labels(self, name: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Search for drug label objects by name.
+        (Drug labels can provide additional drug information.)
+        
+        Endpoint: GET /data/label
+        
+        Query Parameters:
+          - name: The drug name (again, might return several candidates)
+          - view: (optional) one of "min", "base", "max"
+        """
+        params = {"name": name, "view": view}
+        return await self._make_request("data/label", params)
+    
+    async def get_drug_label(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Retrieve a Drug Label by its PharmGKB ID.
+        
+        Endpoint: GET /data/label/{id}
+        """
+        endpoint = f"data/label/{pharmgkb_id}"
+        params = {"view": view} if view else {}
+        return await self._make_request(endpoint, params)
+    
+    # -------------------
+    # Pathway APIs
+    # -------------------
+    async def search_pathway(self, name: Optional[str] = None, accessionId: Optional[str] = None,
+                             view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Query for pathway objects.
+        
+        Endpoint: GET /data/pathway
+        
+        Query Parameters:
+          - name: the name of the pathway
+          - accessionId: the PharmGKB identifier of the pathway
+          - view: (optional) one of "min", "base", "max"
+        """
+        params: Dict[str, Any] = {"view": view}
+        if name:
+            params["name"] = name
+        if accessionId:
+            params["accessionId"] = accessionId
+        return await self._make_request("data/pathway", params)
+    
+    async def get_pathway(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Retrieve a Pathway object by its PharmGKB ID.
+        
+        Endpoint: GET /data/pathway/{id}
+        """
+        endpoint = f"data/pathway/{pharmgkb_id}"
+        params = {"view": view} if view else {}
+        return await self._make_request(endpoint, params)
+    
+    # -------------------
+    # Additional Endpoints (Optional)
+    # -------------------
+    async def search_clinical_annotation(self, query_params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Query clinical annotations.
+        
+        Endpoint: GET /data/clinicalAnnotation
+        
+        Note: The clinicalAnnotation endpoint does not support filtering by chemical,
+              so you may need to perform client-side filtering on the returned list.
+        """
+        return await self._make_request("data/clinicalAnnotation", query_params)
+    
+    async def get_variant_annotation(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
+        """
+        Retrieve a Variant Annotation using its PharmGKB ID.
+        
+        Endpoint: GET /data/variantAnnotation/{id}
+        """
+        endpoint = f"data/variantAnnotation/{pharmgkb_id}"
+        params = {"view": view} if view else {}
+        return await self._make_request(endpoint, params)
 
-    async def get_drug_labels(self,
-                            drug_id: str,
-                            source: Optional[str] = None) -> Dict:
-        """Access drug labeling information"""
-        params = {
-            "drugId": drug_id
-        }
-        if source:
-            params["source"] = source
-            
-        return await self._make_request("label", params)
-
-    async def get_variant_annotations(self,
-                                   variant_id: str,
-                                   drug_id: Optional[str] = None) -> Dict:
-        """Get variant-drug associations"""
-        params = {
-            "variantId": variant_id
-        }
-        if drug_id:
-            params["drugId"] = drug_id
-            
-        return await self._make_request("variantAnnotation", params)
-
-    async def get_pathways(self,
-                          drug_id: Optional[str] = None,
-                          gene_id: Optional[str] = None) -> Dict:
-        """Access pharmacogenomic pathways"""
-        params = {}
-        if drug_id:
-            params["drugId"] = drug_id
-        if gene_id:
-            params["geneId"] = gene_id
-            
-        return await self._make_request("pathway", params)
-
-    async def get_disease_associations(self,
-                                    disease_id: str,
-                                    association_type: Optional[str] = None) -> Dict:
-        """Get disease-drug-gene relationships"""
-        params = {
-            "diseaseId": disease_id
-        }
-        if association_type:
-            params["associationType"] = association_type
-            
-        return await self._make_request("disease", params)
 
 class BioGridClient(BioDatabaseAPI):
     def __init__(self, access_key: str):
