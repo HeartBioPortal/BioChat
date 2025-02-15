@@ -11,8 +11,10 @@ from src.APIHub import (
 )
 from src.schemas import (
     BioGridChemicalParams, BioGridInteractionParams, IntActSearchParams, LiteratureSearchParams, 
-    PharmGKBClinicalParams, PharmGKBVariantParams, StringDBEnrichmentParams, VariantSearchParams, 
-    GWASSearchParams, ProteinInfoParams, PathwayAnalysisParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams
+ StringDBEnrichmentParams, VariantSearchParams, 
+    GWASSearchParams, ProteinInfoParams, PathwayAnalysisParams, GeneticVariantParams,TargetAnalysisParams, DiseaseAnalysisParams,
+      PharmGKBChemicalQueryParams, PharmGKBGetChemicalParams, PharmGKBDrugLabelQueryParams, PharmGKBGetDrugLabelParams, PharmGKBPathwayQueryParams,
+        PharmGKBGetPathwayParams, PharmGKBClinicalAnnotationQueryParams, PharmGKBVariantAnnotationQueryParams
 )
 
 # Configure logger
@@ -92,6 +94,7 @@ class ToolExecutor:
                 "get_intact_interactions": self._execute_intact_interactions,
                 "analyze_pathways": self._execute_pathway_analysis,
                 "get_pharmgkb_annotations": self._execute_pharmgkb_annotations,
+                "get_pharmgkb_chemical": self._execute_pharmgkb_chemical,
                 "get_pharmgkb_variants": self._execute_pharmgkb_variants,
                 "analyze_target": self._execute_target_analysis,
                 "analyze_disease": self._execute_disease_analysis
@@ -106,6 +109,99 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Tool execution error: {str(e)}")
             return {"error": str(e)}
+
+
+    async def execute_pharmgkb_search_chemical(self, arguments: Dict) -> Dict:
+        """
+        Execute a search for chemicals by name.
+        """
+        try:
+            params = PharmGKBChemicalQueryParams(**arguments)
+            # Use .dict() to convert the Pydantic model to a dictionary
+            return await self.pharmgkb.search_chemical(params.dict())
+        except Exception as e:
+            logger.error(f"PharmGKB search chemical error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_get_chemical(self, arguments: Dict) -> Dict:
+        """
+        Execute retrieval of a chemical by its PharmGKB ID.
+        """
+        try:
+            params = PharmGKBGetChemicalParams(**arguments)
+            return await self.pharmgkb.get_chemical(params.pharmgkb_id, view=params.view)
+        except Exception as e:
+            logger.error(f"PharmGKB get chemical error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_search_drug_labels(self, arguments: Dict) -> Dict:
+        """
+        Execute a search for drug labels by name.
+        """
+        try:
+            params = PharmGKBDrugLabelQueryParams(**arguments)
+            return await self.pharmgkb.search_drug_labels(params.dict())
+        except Exception as e:
+            logger.error(f"PharmGKB search drug labels error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_get_drug_label(self, arguments: Dict) -> Dict:
+        """
+        Execute retrieval of a drug label by its PharmGKB ID.
+        """
+        try:
+            params = PharmGKBGetDrugLabelParams(**arguments)
+            return await self.pharmgkb.get_drug_label(params.pharmgkb_id, view=params.view)
+        except Exception as e:
+            logger.error(f"PharmGKB get drug label error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_search_pathway(self, arguments: Dict) -> Dict:
+        """
+        Execute a search for pathways by name or accessionId.
+        """
+        try:
+            params = PharmGKBPathwayQueryParams(**arguments)
+            return await self.pharmgkb.search_pathway(params.dict())
+        except Exception as e:
+            logger.error(f"PharmGKB search pathway error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_get_pathway(self, arguments: Dict) -> Dict:
+        """
+        Execute retrieval of a pathway by its PharmGKB ID.
+        """
+        try:
+            params = PharmGKBGetPathwayParams(**arguments)
+            return await self.pharmgkb.get_pathway(params.pharmgkb_id, view=params.view)
+        except Exception as e:
+            logger.error(f"PharmGKB get pathway error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_search_clinical_annotation(self, arguments: Dict) -> Dict:
+        """
+        Execute a query for clinical annotations.
+        Note: Filtering must be done client-side as the API does not support filtering by chemical/gene.
+        """
+        try:
+            params = PharmGKBClinicalAnnotationQueryParams(**arguments)
+            return await self.pharmgkb.search_clinical_annotation(params.dict())
+        except Exception as e:
+            logger.error(f"PharmGKB search clinical annotation error: {str(e)}")
+            return {"error": str(e)}
+
+    async def execute_pharmgkb_get_variant_annotation(self, arguments: Dict) -> Dict:
+        """
+        Execute retrieval of a variant annotation by its PharmGKB ID.
+        """
+        try:
+            params = PharmGKBVariantAnnotationQueryParams(**arguments)
+            return await self.pharmgkb.get_variant_annotation(params.pharmgkb_id, view=params.view)
+        except Exception as e:
+            logger.error(f"PharmGKB get variant annotation error: {str(e)}")
+            return {"error": str(e)}
+
+
 
     async def _execute_string_interactions(self, arguments: Dict) -> Dict:
         """Execute STRING-DB interaction analysis with optimized filtering."""
@@ -198,29 +294,6 @@ class ToolExecutor:
             logger.error(f"IntAct search error: {str(e)}")
             return {"error": str(e)}
 
-    async def _execute_pharmgkb_annotations(self, arguments: Dict) -> Dict:
-        """Execute PharmGKB clinical annotation search"""
-        try:
-            params = PharmGKBClinicalParams(**arguments)
-            return await self.pharmgkb.get_clinical_annotations(
-                drug_id=params.drug_id,
-                gene_id=params.gene_id
-            )
-        except Exception as e:
-            logger.error(f"PharmGKB annotation error: {str(e)}")
-            return {"error": str(e)}
-
-    async def _execute_pharmgkb_variants(self, arguments: Dict) -> Dict:
-        """Execute PharmGKB variant annotation search"""
-        try:
-            params = PharmGKBVariantParams(**arguments)
-            return await self.pharmgkb.get_variant_annotations(
-                variant_id=params.variant_id,
-                drug_id=params.drug_id
-            )
-        except Exception as e:
-            logger.error(f"PharmGKB variant error: {str(e)}")
-            return {"error": str(e)}
         
     async def _execute_literature_search(self, arguments: Dict) -> Dict:
         """Execute literature search using NCBI"""
