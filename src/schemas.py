@@ -159,15 +159,49 @@ class DiseaseAnalysisParams(BaseModel):
         le=1.0
     )
 
-class PharmGKBClinicalParams(BaseModel):
-    """Parameters for PharmGKB clinical annotation queries"""
-    drug_id: Optional[str] = Field(None, description="PharmGKB drug identifier")
-    gene_id: Optional[str] = Field(None, description="PharmGKB gene identifier")
 
-class PharmGKBVariantParams(BaseModel):
-    """Parameters for PharmGKB variant annotation queries"""
-    variant_id: str = Field(description="Variant identifier")
-    drug_id: Optional[str] = Field(None, description="Drug identifier")
+class PharmGKBChemicalQueryParams(BaseModel):
+    """Parameters for searching Chemical objects by name."""
+    name: str = Field(..., description="The chemical (drug) name to query")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBGetChemicalParams(BaseModel):
+    """Parameters for retrieving a Chemical object by PharmGKB ID."""
+    pharmgkb_id: str = Field(..., description="The PharmGKB chemical identifier")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBDrugLabelQueryParams(BaseModel):
+    """Parameters for searching Drug Label objects by name."""
+    name: str = Field(..., description="The drug name to query")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBGetDrugLabelParams(BaseModel):
+    """Parameters for retrieving a Drug Label by PharmGKB ID."""
+    pharmgkb_id: str = Field(..., description="The PharmGKB drug label identifier")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBPathwayQueryParams(BaseModel):
+    """Parameters for querying Pathway objects."""
+    name: Optional[str] = Field(None, description="The name of the pathway")
+    accessionId: Optional[str] = Field(None, description="The PharmGKB pathway identifier")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBGetPathwayParams(BaseModel):
+    """Parameters for retrieving a Pathway object by PharmGKB ID."""
+    pharmgkb_id: str = Field(..., description="The PharmGKB pathway identifier")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBClinicalAnnotationQueryParams(BaseModel):
+    """Parameters for querying Clinical Annotation objects."""
+    # No filtering parameters are officially supported by the API,
+    # but you may include a view parameter.
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
+class PharmGKBVariantAnnotationQueryParams(BaseModel):
+    """Parameters for retrieving a Variant Annotation by PharmGKB ID."""
+    pharmgkb_id: str = Field(..., description="The PharmGKB variant annotation identifier")
+    view: Optional[str] = Field("base", description="The view level (min, base, max)")
+
 
 class PharmGKBDiseaseParams(BaseModel):
     """Parameters for PharmGKB disease association queries"""
@@ -277,23 +311,7 @@ BIOCHAT_TOOLS = [
             "required": ["genes"]
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_pharmgkb_annotations",
-            "description": "Get pharmacogenomic annotations from PharmGKB.",
-            "parameters": PharmGKBClinicalParams.model_json_schema()
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_pharmgkb_variants",
-            "description": "Get variant annotations from PharmGKB.",
-            "parameters": PharmGKBVariantParams.model_json_schema(),
-            "required": ["variant_id"]
-        }
-    },
+
     {
         "type": "function",
         "function": {
@@ -320,5 +338,81 @@ BIOCHAT_TOOLS = [
             "parameters": BioGridChemicalParams.model_json_schema(),
             "required": ["gene_list"]
         }
+    },
+    {
+    "type": "function",
+    "function": {
+        "name": "search_chemical",
+        "description": "Search for Chemical objects by name to retrieve candidate PharmGKB compound IDs.",
+        "parameters": PharmGKBChemicalQueryParams.model_json_schema(),
+        "required": ["name"]
     }
+},{
+    "type": "function",
+    "function": {
+        "name": "get_chemical",
+        "description": "Retrieve a Chemical object by its PharmGKB ID.",
+        "parameters": PharmGKBGetChemicalParams.model_json_schema(),
+        "required": ["pharmgkb_id"]
+    }
+}
+,{
+    "type": "function",
+    "function": {
+    "type": "function",
+    "function": {
+        "name": "get_drug_label",
+        "description": "Retrieve a Drug Label by its PharmGKB ID.",
+        "parameters": PharmGKBGetDrugLabelParams.model_json_schema(),
+        "required": ["pharmgkb_id"]
+    }
+}
+},{
+    "type": "function",
+    "function": {
+        "name": "search_drug_labels",
+        "description": "Search for Drug Label objects by name.",
+        "parameters": PharmGKBDrugLabelQueryParams.model_json_schema(),
+        "required": ["name"]
+    }
+}
+,{
+    "type": "function",
+    "function": {
+        "name": "search_pathway",
+        "description": "Query for Pathway objects by name or accessionId.",
+        "parameters": PharmGKBPathwayQueryParams.model_json_schema(),
+        "required": []
+    }
+}
+,{
+    "type": "function",
+    "function": {
+        "name": "get_pathway",
+        "description": "Retrieve a Pathway object by its PharmGKB ID.",
+        "parameters": PharmGKBGetPathwayParams.model_json_schema(),
+        "required": ["pharmgkb_id"]
+    }
+}
+,{
+    "type": "function",
+    "function": {
+        "name": "search_clinical_annotation",
+        "description": "Query Clinical Annotation objects (filtering is performed client-side).",
+        "parameters": PharmGKBClinicalAnnotationQueryParams.model_json_schema(),
+        "required": []
+    }
+}
+,{
+    "type": "function",
+    "function": {
+        "name": "get_variant_annotation",
+        "description": "Retrieve a Variant Annotation by its PharmGKB ID.",
+        "parameters": PharmGKBVariantAnnotationQueryParams.model_json_schema(),
+        "required": ["pharmgkb_id"]
+    }
+}
+
+
+
 ]
