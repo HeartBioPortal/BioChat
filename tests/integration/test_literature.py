@@ -7,7 +7,7 @@ from tests.utils.logger import test_logger
 async def test_complex_query(integration_orchestrator, clear_conversation_history):
     """Test handling of a complex technical query"""
     # query = """ find protein and genes related to HDL Cholesterol especially in Native Hawaiian and Pacific Islander Populations"""
-    query = """What are the mechanistic relationships between PCSK9 and LDL in heart disease?"""
+    query = """ What can you tell me about any of these compounds C.I. Acid Blue 3, Estrone glucuronide, Trisjuglone, ETC-159, clorsulon, GSK2837808A, JW-55, Pavetannin A2, firategrast, docusate, GNF-5837, PIK-75, PF-477736, choline, phosphatidylcholine, semapimod, perfluorodecalin, JNJ-678, cidofovir, pilaralisib."""
     
     response = await integration_orchestrator.process_query(query)
     
@@ -22,7 +22,7 @@ async def test_complex_query(integration_orchestrator, clear_conversation_histor
     # Verify response structure and content
     assert isinstance(response, str)
     assert len(response) > 200  # Response should be substantive
-    assert "PCSK9" in response and "LDL" in response
+    assert "CD47" in response
     
     # Verify conversation history
     history = integration_orchestrator.get_conversation_history()
