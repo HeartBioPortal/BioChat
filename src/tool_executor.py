@@ -93,11 +93,14 @@ class ToolExecutor:
                 "get_biogrid_chemical_interactions": self._execute_biogrid_chemical_interactions,
                 "get_intact_interactions": self._execute_intact_interactions,
                 "analyze_pathways": self._execute_pathway_analysis,
-                "get_pharmgkb_annotations": self._execute_pharmgkb_annotations,
-                "get_pharmgkb_chemical": self._execute_pharmgkb_chemical,
-                "get_pharmgkb_variants": self._execute_pharmgkb_variants,
                 "analyze_target": self._execute_target_analysis,
-                "analyze_disease": self._execute_disease_analysis
+                "analyze_disease": self._execute_disease_analysis,
+                "search_chemical": self.execute_pharmgkb_search_chemical,
+                "search_drug_labels": self.execute_pharmgkb_search_drug_labels,
+                "search_pathway": self.execute_pharmgkb_search_pathway,
+                "search_clinical_annotation": self.execute_pharmgkb_search_clinical_annotation,
+                "get_variant_annotation": self.execute_pharmgkb_get_variant_annotation,
+                "get_pharmgkb_annotations": self._execute_pharmgkb_annotations  # Added this line
             }
             
             handler = handlers.get(function_name)
@@ -111,27 +114,38 @@ class ToolExecutor:
             return {"error": str(e)}
 
 
+
     async def execute_pharmgkb_search_chemical(self, arguments: Dict) -> Dict:
         """
-        Execute a search for chemicals by name.
+        Execute a search for chemicals by name, handling the name-to-ID resolution.
         """
         try:
             params = PharmGKBChemicalQueryParams(**arguments)
-            # Use .dict() to convert the Pydantic model to a dictionary
-            return await self.pharmgkb.search_chemical(params.dict())
+            results = await self.pharmgkb.search_chemical_by_name(params.name)
+            
+            if isinstance(results, list) and results:
+                # Get full details for each found chemical
+                detailed_results = []
+                for chemical in results:
+                    if chemical.get('id'):
+                        details = await self.pharmgkb.get_chemical_by_id(chemical['id'])
+                        if not isinstance(details, dict) or "error" not in details:
+                            detailed_results.append(details)
+                
+                if detailed_results:
+                    return {
+                        "matches": detailed_results,
+                        "count": len(detailed_results)
+                    }
+            
+            return {
+                "matches": [],
+                "count": 0,
+                "message": f"No chemicals found matching name: {params.name}"
+            }
+                
         except Exception as e:
-            logger.error(f"PharmGKB search chemical error: {str(e)}")
-            return {"error": str(e)}
-
-    async def execute_pharmgkb_get_chemical(self, arguments: Dict) -> Dict:
-        """
-        Execute retrieval of a chemical by its PharmGKB ID.
-        """
-        try:
-            params = PharmGKBGetChemicalParams(**arguments)
-            return await self.pharmgkb.get_chemical(params.pharmgkb_id, view=params.view)
-        except Exception as e:
-            logger.error(f"PharmGKB get chemical error: {str(e)}")
+            logger.error(f"PharmGKB chemical search error: {str(e)}")
             return {"error": str(e)}
 
     async def execute_pharmgkb_search_drug_labels(self, arguments: Dict) -> Dict:
@@ -140,44 +154,91 @@ class ToolExecutor:
         """
         try:
             params = PharmGKBDrugLabelQueryParams(**arguments)
-            return await self.pharmgkb.search_drug_labels(params.dict())
+            results = await self.pharmgkb.search_drug_labels_by_name(params.name)
+            
+            if isinstance(results, list) and results:
+                return {
+                    "matches": results,
+                    "count": len(results)
+                }
+                
+            return {
+                "matches": [],
+                "count": 0,
+                "message": f"No drug labels found matching name: {params.name}"
+            }
+                
         except Exception as e:
-            logger.error(f"PharmGKB search drug labels error: {str(e)}")
-            return {"error": str(e)}
-
-    async def execute_pharmgkb_get_drug_label(self, arguments: Dict) -> Dict:
-        """
-        Execute retrieval of a drug label by its PharmGKB ID.
-        """
-        try:
-            params = PharmGKBGetDrugLabelParams(**arguments)
-            return await self.pharmgkb.get_drug_label(params.pharmgkb_id, view=params.view)
-        except Exception as e:
-            logger.error(f"PharmGKB get drug label error: {str(e)}")
+            logger.error(f"PharmGKB drug label search error: {str(e)}")
             return {"error": str(e)}
 
     async def execute_pharmgkb_search_pathway(self, arguments: Dict) -> Dict:
         """
-        Execute a search for pathways by name or accessionId.
+        Execute a search for pathways by name.
         """
         try:
             params = PharmGKBPathwayQueryParams(**arguments)
-            return await self.pharmgkb.search_pathway(params.dict())
+            results = await self.pharmgkb.search_pathway_by_name(params.name)
+            
+            if isinstance(results, list) and results:
+                return {
+                    "matches": results,
+                    "count": len(results)
+                }
+                
+            return {
+                "matches": [],
+                "count": 0,
+                "message": f"No pathways found matching name: {params.name}"
+            }
+                
         except Exception as e:
-            logger.error(f"PharmGKB search pathway error: {str(e)}")
+            logger.error(f"PharmGKB pathway search error: {str(e)}")
             return {"error": str(e)}
 
-    async def execute_pharmgkb_get_pathway(self, arguments: Dict) -> Dict:
-        """
-        Execute retrieval of a pathway by its PharmGKB ID.
-        """
+    async def _execute_pharmgkb_annotations(self, arguments: Dict) -> Dict:
+        """Execute PharmGKB annotation search with error handling."""
         try:
-            params = PharmGKBGetPathwayParams(**arguments)
-            return await self.pharmgkb.get_pathway(params.pharmgkb_id, view=params.view)
-        except Exception as e:
-            logger.error(f"PharmGKB get pathway error: {str(e)}")
-            return {"error": str(e)}
+            if not self.pharmgkb:
+                raise ValueError("PharmGKB client not initialized")
 
+            # Extract query parameters from arguments
+            gene_id = arguments.get('gene_id')
+            if not gene_id:
+                raise ValueError("gene_id is required for PharmGKB annotation search")
+
+            # First, search for clinical annotations
+            clinical_annotations = await self.pharmgkb.search_clinical_annotation({
+                "view": "base"
+            })
+
+            # Filter annotations for the specific gene
+            filtered_annotations = []
+            for annotation in clinical_annotations.get('data', []):
+                if gene_id.upper() in [g.upper() for g in annotation.get('genes', [])]:
+                    filtered_annotations.append(annotation)
+
+            # Organize results
+            results = {
+                "clinical_annotations": filtered_annotations,
+                "metadata": {
+                    "gene_id": gene_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "PharmGKB",
+                    "total_annotations": len(filtered_annotations)
+                }
+            }
+
+            # Save full API response
+            file_path = self.save_api_response("pharmgkb_annotations", results)
+            logger.info(f"Full PharmGKB annotation response saved to {file_path}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"PharmGKB annotation error: {str(e)}")
+            return {"error": str(e)}
+    
     async def execute_pharmgkb_search_clinical_annotation(self, arguments: Dict) -> Dict:
         """
         Execute a query for clinical annotations.
@@ -267,31 +328,89 @@ class ToolExecutor:
 
 
     async def _execute_biogrid_chemical_interactions(self, arguments: Dict) -> Dict:
-        """Execute BioGRID chemical interaction analysis"""
+        """Execute BioGRID chemical interaction search with improved processing."""
         try:
             params = BioGridChemicalParams(**arguments)
-            return await self.biogrid.get_chemical_interactions(
-                gene_list=params.gene_list,
-                chemical_list=params.chemical_list,
-                evidence_list=params.evidence_list
-            )
+            if not params.chemical_list:
+                error = "No chemicals provided for search"
+                BioChatLogger.log_error("BioGRID validation error", Exception(error))
+                return {
+                    "success": False,
+                    "error": error
+                }
+                
+            results = await self.biogrid.get_chemical_interactions(params.chemical_list)
+            
+            if results.get("success"):
+                # Process and format the chemical interaction data
+                interactions = results.get("data", {})
+                metadata = results.get("metadata", {})
+                
+                # Create a more useful summary
+                summary = {
+                    "chemicals_searched": params.chemical_list,
+                    "chemicals_found": metadata.get("chemicals_found", 0),
+                    "total_interactions": results.get("interaction_count", 0),
+                    "protein_targets": metadata.get("protein_targets", 0),
+                    "experiment_types": metadata.get("experiment_types", []),
+                    "top_interactions": []
+                }
+                
+                # Add top interactions (limit to 5 for readability)
+                for interaction_id, interaction in list(interactions.items())[:5]:
+                    summary["top_interactions"].append({
+                        "chemical": interaction.get("chemical_name"),
+                        "target": interaction.get("protein_target"),
+                        "type": interaction.get("interaction_type"),
+                        "evidence": interaction.get("interaction_evidence"),
+                        "publication": f"{interaction.get('publication')} (PMID:{interaction.get('pubmed_id')})"
+                    })
+                
+                # Save full response but return summary
+                file_path = self.save_api_response("biogrid_chemicals", results)
+                
+                return {
+                    "success": True,
+                    "summary": summary,
+                    "full_data_path": file_path,
+                    "message": f"Found {summary['total_interactions']} chemical-protein interactions. Full data saved to {file_path}"
+                }
+                
+            return results
+            
         except Exception as e:
-            logger.error(f"BioGRID chemical interaction error: {str(e)}")
-            return {"error": str(e)}
+            BioChatLogger.log_error("BioGRID chemical interaction execution error", e)
+            return {
+                "error": str(e),
+                "chemical_list": params.chemical_list if params else arguments.get("chemical_list", [])
+            }
 
     async def _execute_intact_interactions(self, arguments: Dict) -> Dict:
-        """Execute IntAct interaction search"""
+        """Execute IntAct interaction search with improved chemical handling."""
         try:
             params = IntActSearchParams(**arguments)
-            return await self.intact.search(
+            results = await self.intact.search(
                 query=params.query,
-                species=params.species,
                 negative_filter=params.negative_filter,
                 page=params.page,
                 page_size=params.page_size
             )
+            
+            # If direct search fails, try faceted search
+            if "error" in results:
+                facet_results = await self.intact.get_interaction_facets(params.query)
+                if not "error" in facet_results:
+                    results = facet_results
+            
+            # Save response if successful
+            if results.get("success"):
+                file_path = self.save_api_response("intact_interactions", results)
+                results["download_url"] = file_path
+                
+            return results
+            
         except Exception as e:
-            logger.error(f"IntAct search error: {str(e)}")
+            logger.error(f"IntAct interaction error: {str(e)}")
             return {"error": str(e)}
 
         
