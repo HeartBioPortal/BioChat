@@ -35,29 +35,76 @@ class BioChatOrchestrator:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
 
-    def save_gpt_response(self, query: str, response: str) -> str:
-        """Save the final GPT response to a file and return the file path."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"gpt_response_{timestamp}.json"
-        filepath = os.path.join(API_RESULTS_DIR, filename)
+
+    def summarize_api_response(self, tool_name: str, response: Dict) -> str:
+        """Summarize API response to reduce token count."""
+        summary = []
         
-        with open(filepath, "w") as file:
-            json.dump({"query": query, "response": response}, file, indent=4)
+        if "error" in response:
+            return f"{tool_name}: Error - {response['error']}"
+            
+        if tool_name == "biogrid_chemical_interactions":
+            if response.get("success"):
+                interactions = response.get("data", {})
+                chemical_list = response.get("chemical_list", [])
+                count = response.get("interaction_count", 0)
+                summary.append(f"Found {count} interactions for chemicals: {', '.join(chemical_list)}")
+                # Include only essential interaction data
+                if count > 0:
+                    summary.append("Top interactions:")
+                    for i, interaction in enumerate(list(interactions.values())[:5]):  # Only show top 5
+                        summary.append(f"- {interaction.get('interactorA')} <-> {interaction.get('interactorB')}")
+            else:
+                summary.append(f"No interactions found for chemicals: {', '.join(response.get('chemical_list', []))}")
+                
+        elif tool_name == "intact_interactions":
+            if response.get("success"):
+                data = response.get("data", {})
+                query = response.get("query", "")
+                count = response.get("interaction_count", 0)
+                summary.append(f"Found {count} interactions for query: {query}")
+                # Include only essential interaction data
+                content = data.get("content", [])
+                if content:
+                    summary.append("Top interactions:")
+                    for interaction in content[:5]:  # Only show top 5
+                        summary.append(f"- {interaction.get('interactorA')} <-> {interaction.get('interactorB')}")
+            else:
+                summary.append(f"No interactions found for query: {response.get('query', '')}")
+                
+        # Add similar summarization for other API responses
         
-        logger.info(f"Final GPT response saved at {filepath}")
-        return filepath
+        return "\n".join(summary)
+
 
     async def process_query(self, user_query: str) -> str:
-        """Process a user query and return GPT synthesis as a string."""
-
+        """Process a user query with comprehensive database searches for multiple compounds."""
+        
         self.conversation_history.append({"role": "user", "content": user_query})
 
         messages = [
-            {"role": "system", "content": self._create_system_message()},
+            {"role": "system", "content": """For each chemical compound in the query:
+            1. Search ALL of these databases and collect ALL available information:
+            - PharmGKB for pharmacogenomic data
+            - OpenTargets for drug/target information
+            - STRING-DB for chemical-protein interactions
+            - BioGRID for chemical-protein interactions
+            - NCBI PubMed for research literature
+            2. Make ALL necessary API calls at once in your first response
+            3. Process ALL compounds in parallel
+            4. Return complete tool calls for ALL databases for ALL compounds
+            5. Wait for ALL results before synthesis
+            
+            Important:
+            - Do not make sequential API calls
+            - Request ALL needed data in your first response
+            - Process ALL compounds together
+            - Search ALL databases for each compound
+            """},
             *self.conversation_history
         ]
 
-        # Step 1: Initial request to ChatGPT
+        # Get all tool calls at once
         initial_completion = await self.client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
@@ -66,12 +113,10 @@ class BioChatOrchestrator:
         )
 
         initial_message = initial_completion.choices[0].message
-
-        # Step 2: Collect API responses
         api_responses = {}
 
         if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
-            # First add the assistant's message with tool calls
+            # Add assistant message with all tool calls
             self.conversation_history.append({
                 "role": "assistant",
                 "content": initial_message.content,
@@ -88,69 +133,101 @@ class BioChatOrchestrator:
                 ]
             })
 
-            # Then handle each tool call
+            # Process all tool calls in parallel
+            tool_results = {}
             for tool_call in initial_message.tool_calls:
                 try:
+                    # Execute tool call
                     function_response = await self.tool_executor.execute_tool(tool_call)
-                    api_responses[tool_call.function.name] = function_response
                     
+                    # Store response and add to conversation history
+                    tool_results[tool_call.id] = function_response
+                    function_response = self.summarize_api_response(tool_call.function.name, function_response)
+                    # Add to API responses if contains actual data
+                    if function_response and not (isinstance(function_response, dict) and 
+                        ("error" in function_response or 
+                        function_response.get("matches", []) == [] or 
+                        function_response.get("count", 0) == 0)):
+                        api_responses[tool_call.function.name] = function_response
+                    
+                    # Always add tool response to conversation history
                     self.conversation_history.append({
                         "role": "tool",
-                        "content": json.dumps(function_response),
+                        "content": json.dumps(function_response if function_response else {"result": "No data found"}),
                         "tool_call_id": tool_call.id
                     })
+                    
                 except Exception as e:
-                    api_responses[tool_call.function.name] = {"error": str(e)}
+                    BioChatLogger.log_error(f"API call failed for {tool_call.function.name}: {str(e)}")
                     self.conversation_history.append({
                         "role": "tool",
                         "content": json.dumps({"error": str(e)}),
                         "tool_call_id": tool_call.id
                     })
 
-        # Step 3: Convert API responses to structured JSON format
-        structured_response = {
-            "query": user_query,
-            "synthesis": "",  # Will be filled after ChatGPT processes it
-            "structured_data": api_responses  # Stores API results in JSON format
-        }
+            # Structure all results
+            structured_response = {
+                "query": user_query,
+                "synthesis": "",
+                "structured_data": api_responses
+            }
 
-        # Step 4: Format API results into a system prompt for ChatGPT
-        scientific_context = "**🔬 API Results (Filtered & Relevant):**\n\n"
-        for tool_name, result in api_responses.items():
-            if tool_name == "get_biogrid_interactions" or tool_name == "get_string_interactions":
-                scientific_context += f"**🔗 {tool_name} (Top Interactions):**\n"
-                scientific_context += json.dumps(result.get("top_interactions"), indent=4) + "\n\n"
-                scientific_context += f"📂 Full data available at: {result.get('download_url')}\n\n"
+            # Format complete API results for GPT
+            scientific_context = "**🔬 Complete API Results:**\n\n"
+            if not api_responses:
+                scientific_context += "No data found in any of the queried databases for any compounds.\n\n"
             else:
-                scientific_context += f"**🔗 {tool_name} API Response:**\n{json.dumps(result, indent=4)}\n\n"
+                # Group results by compound
+                by_compound = {}
+                for tool_name, result in api_responses.items():
+                    compound = json.loads(initial_message.tool_calls[0].function.arguments).get("name", "unknown")
+                    if compound not in by_compound:
+                        by_compound[compound] = {}
+                    by_compound[compound][tool_name] = result
 
-        scientific_context += (
-            "\n🔬 **GPT Instructions:**\n"
-            "- Use the API results to generate a scientific summary.\n"
-            "- Reference API sources explicitly.\n"
-            "- If a tool provided a download link, mention that full data is available."
-        )
+                # Format results by compound
+                for compound, results in by_compound.items():
+                    scientific_context += f"\n## {compound}:\n"
+                    for tool_name, result in results.items():
+                        scientific_context += f"\n### {tool_name}:\n"
+                        scientific_context += f"{json.dumps(result, indent=2)}\n"
 
-        # Step 5: Augment conversation history with API data
-        messages = [
-            {"role": "system", "content": self._create_system_message()},
-            {"role": "system", "content": scientific_context},  # Include structured API results
-            *self.conversation_history
-        ]
+            # Generate final synthesis with all data
+            messages = [
+                {"role": "system", "content": self._create_system_message()},
+                {"role": "system", "content": scientific_context},
+                *self.conversation_history
+            ]
 
-        # Step 6: Generate final ChatGPT synthesis
-        final_completion = await self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
+            final_completion = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages
+            )
 
-        structured_response["synthesis"] = final_completion.choices[0].message.content
-        self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
+            structured_response["synthesis"] = final_completion.choices[0].message.content
+            self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
 
-        gpt_response_path = self.save_gpt_response(user_query, structured_response["synthesis"])
-        logger.info(f"GPT response saved at: {gpt_response_path}")
+            # Save complete response
+            gpt_response_path = self.save_gpt_response(user_query, structured_response)
+            BioChatLogger.log_info(f"Complete GPT response saved at: {gpt_response_path}")
 
-        return structured_response["synthesis"]
+            return structured_response["synthesis"]
+
+    def save_gpt_response(self, query: str, response: Dict) -> str:
+        """Save the complete GPT response to a file and return the file path."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"gpt_response_{timestamp}.json"
+        filepath = os.path.join(API_RESULTS_DIR, filename)
+        
+        with open(filepath, "w") as file:
+            json.dump({
+                "query": query,
+                "response": response,
+                "timestamp": timestamp
+            }, file, indent=4)
+        
+        BioChatLogger.log_info(f"GPT response saved at {filepath}")
+        return filepath
 
 
 
