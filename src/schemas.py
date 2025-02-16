@@ -239,6 +239,7 @@ class StringDBEnrichmentParams(BaseModel):
 
 
 
+# Update the problematic tool definition in BIOCHAT_TOOLS
 BIOCHAT_TOOLS = [
     {
         "type": "function",
@@ -311,7 +312,6 @@ BIOCHAT_TOOLS = [
             "required": ["genes"]
         }
     },
-
     {
         "type": "function",
         "function": {
@@ -340,79 +340,75 @@ BIOCHAT_TOOLS = [
         }
     },
     {
-    "type": "function",
-    "function": {
-        "name": "search_chemical",
-        "description": "Search for Chemical objects by name to retrieve candidate PharmGKB compound IDs.",
-        "parameters": PharmGKBChemicalQueryParams.model_json_schema(),
-        "required": ["name"]
+        "type": "function",
+        "function": {
+            "name": "search_chemical",
+            "description": "Search for Chemical objects by name to retrieve candidate PharmGKB compound IDs.",
+            "parameters": PharmGKBChemicalQueryParams.model_json_schema(),
+            "required": ["name"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_chemical",
+            "description": "Retrieve a Chemical object by its PharmGKB ID.",
+            "parameters": PharmGKBGetChemicalParams.model_json_schema(),
+            "required": ["pharmgkb_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_drug_label",
+            "description": "Retrieve a Drug Label by its PharmGKB ID.",
+            "parameters": PharmGKBGetDrugLabelParams.model_json_schema(),
+            "required": ["pharmgkb_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_drug_labels",
+            "description": "Search for Drug Label objects by name.",
+            "parameters": PharmGKBDrugLabelQueryParams.model_json_schema(),
+            "required": ["name"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_pathway",
+            "description": "Query for Pathway objects by name or accessionId.",
+            "parameters": PharmGKBPathwayQueryParams.model_json_schema(),
+            "required": []
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pathway",
+            "description": "Retrieve a Pathway object by its PharmGKB ID.",
+            "parameters": PharmGKBGetPathwayParams.model_json_schema(),
+            "required": ["pharmgkb_id"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_clinical_annotation",
+            "description": "Query Clinical Annotation objects (filtering is performed client-side).",
+            "parameters": PharmGKBClinicalAnnotationQueryParams.model_json_schema(),
+            "required": []
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_variant_annotation",
+            "description": "Retrieve a Variant Annotation by its PharmGKB ID.",
+            "parameters": PharmGKBVariantAnnotationQueryParams.model_json_schema(),
+            "required": ["pharmgkb_id"]
+        }
     }
-},{
-    "type": "function",
-    "function": {
-        "name": "get_chemical",
-        "description": "Retrieve a Chemical object by its PharmGKB ID.",
-        "parameters": PharmGKBGetChemicalParams.model_json_schema(),
-        "required": ["pharmgkb_id"]
-    }
-}
-,{
-    "type": "function",
-    "function": {
-    "type": "function",
-    "function": {
-        "name": "get_drug_label",
-        "description": "Retrieve a Drug Label by its PharmGKB ID.",
-        "parameters": PharmGKBGetDrugLabelParams.model_json_schema(),
-        "required": ["pharmgkb_id"]
-    }
-}
-},{
-    "type": "function",
-    "function": {
-        "name": "search_drug_labels",
-        "description": "Search for Drug Label objects by name.",
-        "parameters": PharmGKBDrugLabelQueryParams.model_json_schema(),
-        "required": ["name"]
-    }
-}
-,{
-    "type": "function",
-    "function": {
-        "name": "search_pathway",
-        "description": "Query for Pathway objects by name or accessionId.",
-        "parameters": PharmGKBPathwayQueryParams.model_json_schema(),
-        "required": []
-    }
-}
-,{
-    "type": "function",
-    "function": {
-        "name": "get_pathway",
-        "description": "Retrieve a Pathway object by its PharmGKB ID.",
-        "parameters": PharmGKBGetPathwayParams.model_json_schema(),
-        "required": ["pharmgkb_id"]
-    }
-}
-,{
-    "type": "function",
-    "function": {
-        "name": "search_clinical_annotation",
-        "description": "Query Clinical Annotation objects (filtering is performed client-side).",
-        "parameters": PharmGKBClinicalAnnotationQueryParams.model_json_schema(),
-        "required": []
-    }
-}
-,{
-    "type": "function",
-    "function": {
-        "name": "get_variant_annotation",
-        "description": "Retrieve a Variant Annotation by its PharmGKB ID.",
-        "parameters": PharmGKBVariantAnnotationQueryParams.model_json_schema(),
-        "required": ["pharmgkb_id"]
-    }
-}
-
-
-
 ]
