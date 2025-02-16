@@ -558,249 +558,310 @@ class ReactomeClient(BioDatabaseAPI):
             BioChatLogger.log_error(f"Error getting disease events for {disease_id}", e)
             return {"error": str(e)}
 
-class IntActClient(BioDatabaseAPI):
-    def __init__(self):
-        super().__init__()
-        self.base_url = "https://www.ebi.ac.uk/intact/ws/interaction"
-
-    async def search(self, 
-                    query: str, 
-                    species: Optional[str] = None,
-                    negative_filter: str = "POSITIVE_ONLY",
-                    page: int = 0,
-                    page_size: int = 10) -> Dict:
-        """Search molecular interactions using the findInteractions endpoint"""
-        params = {
-            "query": query,
-            "page": page,
-            "pageSize": page_size,
-            "negativeFilter": negative_filter
-        }
-        if species:
-            params["species"] = species
-            
-        return await self._make_request("findInteractions", params)
-
-    async def get_interaction_partners(self,
-                                    protein_id: str,
-                                    species: Optional[str] = None) -> Dict:
-        """Get detailed interaction partners for a specific protein"""
-        params = {
-            "query": f"id:{protein_id}",
-            "format": "json"
-        }
-        if species:
-            params["species"] = species
-            
-        return await self._make_request("interaction_partners", params)
-        
-    async def get_interaction_facets(self,
-                                   query: str,
-                                   interaction_types: Optional[List[str]] = None) -> Dict:
-        """Get interaction statistics and metadata"""
-        params = {
-            "query": query
-        }
-        if interaction_types:
-            params["interactionTypesFilter"] = ",".join(interaction_types)
-            
-        return await self._make_request("findInteractionFacets", params)
-
-
-class PharmGKBClient(BioDatabaseAPI):
-    """
-    A PharmGKB API client that provides useful endpoints for analyzing drugs/chemicals
-    and pathways.
-    """
-    def __init__(self):
-        super().__init__()
-        self.base_url = "https://api.pharmgkb.org/v1"
-    
-    # -------------------
-    # Chemical (Drug) APIs
-    # -------------------
-    async def search_chemical(self, name: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Search for Chemical objects by name.
-        This can help you identify the correct PharmGKB ID when multiple synonyms exist.
-        
-        Endpoint: GET /data/chemical
-        
-        Query Parameters:
-          - name: The chemical (drug) name (may match multiple synonyms)
-          - view: (optional) one of "min", "base", "max"
-        """
-        params = {"name": name, "view": view}
-        return await self._make_request("data/chemical", params)
-    
-    async def get_chemical(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Retrieve a Chemical object by its PharmGKB ID.
-        
-        Endpoint: GET /data/chemical/{id}
-        """
-        endpoint = f"data/chemical/{pharmgkb_id}"
-        params = {"view": view} if view else {}
-        return await self._make_request(endpoint, params)
-    
-    async def search_drug_labels(self, name: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Search for drug label objects by name.
-        (Drug labels can provide additional drug information.)
-        
-        Endpoint: GET /data/label
-        
-        Query Parameters:
-          - name: The drug name (again, might return several candidates)
-          - view: (optional) one of "min", "base", "max"
-        """
-        params = {"name": name, "view": view}
-        return await self._make_request("data/label", params)
-    
-    async def get_drug_label(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Retrieve a Drug Label by its PharmGKB ID.
-        
-        Endpoint: GET /data/label/{id}
-        """
-        endpoint = f"data/label/{pharmgkb_id}"
-        params = {"view": view} if view else {}
-        return await self._make_request(endpoint, params)
-    
-    # -------------------
-    # Pathway APIs
-    # -------------------
-    async def search_pathway(self, name: Optional[str] = None, accessionId: Optional[str] = None,
-                             view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Query for pathway objects.
-        
-        Endpoint: GET /data/pathway
-        
-        Query Parameters:
-          - name: the name of the pathway
-          - accessionId: the PharmGKB identifier of the pathway
-          - view: (optional) one of "min", "base", "max"
-        """
-        params: Dict[str, Any] = {"view": view}
-        if name:
-            params["name"] = name
-        if accessionId:
-            params["accessionId"] = accessionId
-        return await self._make_request("data/pathway", params)
-    
-    async def get_pathway(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Retrieve a Pathway object by its PharmGKB ID.
-        
-        Endpoint: GET /data/pathway/{id}
-        """
-        endpoint = f"data/pathway/{pharmgkb_id}"
-        params = {"view": view} if view else {}
-        return await self._make_request(endpoint, params)
-    
-    # -------------------
-    # Additional Endpoints (Optional)
-    # -------------------
-    async def search_clinical_annotation(self, query_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Query clinical annotations.
-        
-        Endpoint: GET /data/clinicalAnnotation
-        
-        Note: The clinicalAnnotation endpoint does not support filtering by chemical,
-              so you may need to perform client-side filtering on the returned list.
-        """
-        return await self._make_request("data/clinicalAnnotation", query_params)
-    
-    async def get_variant_annotation(self, pharmgkb_id: str, view: Optional[str] = "base") -> Dict[str, Any]:
-        """
-        Retrieve a Variant Annotation using its PharmGKB ID.
-        
-        Endpoint: GET /data/variantAnnotation/{id}
-        """
-        endpoint = f"data/variantAnnotation/{pharmgkb_id}"
-        params = {"view": view} if view else {}
-        return await self._make_request(endpoint, params)
-
-
 class BioGridClient(BioDatabaseAPI):
+    """Enhanced BioGRID client specifically for chemical interactions."""
+    
     def __init__(self, access_key: str):
         super().__init__(api_key=access_key)
         self.base_url = "https://webservice.thebiogrid.org"
 
-    async def search(self, query: str) -> Dict:
-        """Implement the abstract search method for BioGRID"""
+    async def get_chemical_interactions(self, chemical_list: List[str]) -> Dict:
+        """
+        Get chemical-protein interactions.
+        
+        Chemical interactions in BioGRID require specific parameters:
+        - chemicalList for the chemicals
+        - includeInteractors=true to get protein targets
+        - max=10000 to get comprehensive results
+        """
         try:
             params = {
-                "geneList": query,
-                "searchIds": "true",
-                "searchNames": "true",
+                "accessKey": self.api_key,
                 "format": "json",
-                "accessKey": self.api_key
+                "chemicalList": "|".join(chemical_list),
+                "includeInteractors": "true",
+                "max": "10000",  # Get maximum results
+                "searchNames": "false",  # Not searching gene names
+                "searchSynonyms": "false"  # Not searching gene synonyms
             }
-            return await self._make_request("interactions", params)
+            
+            BioChatLogger.log_info(f"Querying BioGRID chemicals: {chemical_list}")
+            
+            response = await self._make_request("interactions", params)
+            
+            if isinstance(response, dict):
+                if response.get("STATUS") == "ERROR":
+                    error_msg = response.get('MESSAGES', ['Unknown error'])[0]
+                    BioChatLogger.log_error("BioGRID API error", Exception(error_msg))
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "chemical_list": chemical_list
+                    }
+                
+                # Process and filter chemical interactions
+                chemical_interactions = {}
+                for interaction_id, interaction in response.items():
+                    # Check if this is a chemical interaction
+                    if interaction.get("EXPERIMENTAL_SYSTEM") in [
+                        "Biochemical Activity",
+                        "Chemical-Physical",
+                        "Co-crystal Structure",
+                        "Pharmacological",
+                        "Reconstituted Complex"
+                    ]:
+                        chemical_interactions[interaction_id] = {
+                            "chemical_name": interaction.get("OFFICIAL_SYMBOL_A"),
+                            "protein_target": interaction.get("OFFICIAL_SYMBOL_B"),
+                            "interaction_type": interaction.get("EXPERIMENTAL_SYSTEM"),
+                            "interaction_evidence": interaction.get("EXPERIMENTAL_SYSTEM_TYPE"),
+                            "pubmed_id": interaction.get("PUBMED_ID"),
+                            "publication": interaction.get("PUBMED_AUTHOR"),
+                            "throughput": interaction.get("THROUGHPUT"),
+                            "qualifications": interaction.get("QUALIFICATIONS"),
+                            "source": interaction.get("SOURCEDB")
+                        }
+                
+                return {
+                    "success": True,
+                    "data": chemical_interactions,
+                    "chemical_list": chemical_list,
+                    "interaction_count": len(chemical_interactions),
+                    "metadata": {
+                        "chemicals_found": len(set(i["chemical_name"] for i in chemical_interactions.values())),
+                        "protein_targets": len(set(i["protein_target"] for i in chemical_interactions.values())),
+                        "experiment_types": list(set(i["interaction_type"] for i in chemical_interactions.values()))
+                    }
+                }
+            
+            return {
+                "success": False,
+                "error": "Invalid response format",
+                "chemical_list": chemical_list
+            }
+            
         except Exception as e:
-            BioChatLogger.log_error(f"BioGRID search error", e)
+            BioChatLogger.log_error("BioGRID chemical interaction error", e)
+            return {"error": str(e), "chemical_list": chemical_list}
+
+    async def search(self, chemical_name: str) -> Dict:
+        """
+        Search for a specific chemical and its interactions.
+        Provides more focused results for a single chemical.
+        """
+        try:
+            # First try exact chemical name
+            results = await self.get_chemical_interactions([chemical_name])
+            
+            if not results.get("success") or results.get("interaction_count", 0) == 0:
+                # If no results, try with synonyms if available
+                # Note: BioGRID doesn't directly support chemical synonym search
+                # This is just a placeholder for future enhancement
+                pass
+                
+            return results
+            
+        except Exception as e:
+            BioChatLogger.log_error(f"Chemical search error for {chemical_name}", e)
+            return {"error": str(e), "chemical": chemical_name}
+
+class IntActClient(BioDatabaseAPI):
+    """
+    Enhanced IntAct client with proper chemical interaction handling.
+    """
+    def __init__(self):
+        super().__init__()
+        self.base_url = "https://www.ebi.ac.uk/intact/ws/interaction"
+        
+    async def search(self, query: str, species: Optional[str] = None,
+                    negative_filter: str = "POSITIVE_ONLY", page: int = 0,
+                    page_size: int = 10) -> Dict:
+        """
+        Search IntAct database with improved chemical query handling.
+        """
+        try:
+            # Format query according to IntAct specs
+            params = {
+                "query": query,
+                "page": page,
+                "pageSize": page_size,
+                "negativeFilter": negative_filter
+            }
+            if species:
+                params["species"] = species
+            
+            # First try findInteractions endpoint
+            try:
+                response = await self._make_request("findInteractions", params)
+                if response:
+                    return {
+                        "success": True,
+                        "data": response,
+                        "query": query,
+                        "interaction_count": len(response.get("content", [])) if isinstance(response, dict) else 0
+                    }
+            except Exception as first_error:
+                BioChatLogger.log_error(f"IntAct findInteractions error: {str(first_error)}", e)
+                # If first attempt fails, try faceted search
+                try:
+                    facet_response = await self._make_request("findInteractionFacets", params)
+                    if facet_response:
+                        return {
+                            "success": True,
+                            "data": facet_response,
+                            "query": query,
+                            "interaction_count": facet_response.get("totalElements", 0)
+                        }
+                except Exception as second_error:
+                    BioChatLogger.log_error(f"IntAct faceted search error: {str(second_error)}", e)
+                    raise second_error
+                
+        except Exception as e:
+            BioChatLogger.log_error(f"IntAct search error: {str(e)}", e)
             return {"error": str(e)}
-    
-    async def get_core_interactions(self,
-                                  gene_list: List[str],
-                                  include_interactors: bool = False,
-                                  tax_id: Optional[str] = None) -> Dict:
-        """Get protein-protein interactions"""
-        params = {
-            "geneList": "|".join(gene_list),
-            "includeInteractors": str(include_interactors).lower(),
-            "format": "json",
-            "accessKey": self.api_key
-        }
-        if tax_id:
-            params["taxId"] = tax_id
-            
-        return await self._make_request("interactions", params)
 
-    async def get_experimental_evidence(self, format: str = "json") -> Dict:
-        """Get interaction evidence types"""
-        params = {
-            "accessKey": self.api_key,
-            "format": format
-        }
-        return await self._make_request("evidence", params)
-
-    async def get_chemical_interactions(self,
-                                     gene_list: List[str],
-                                     chemical_list: Optional[List[str]] = None,
-                                     evidence_list: Optional[List[str]] = None) -> Dict:
-        """Get protein-chemical interactions"""
-        params = {
-            "geneList": "|".join(gene_list),
-            "format": "json",
-            "accessKey": self.api_key
-        }
-        if chemical_list:
-            params["chemicalList"] = "|".join(chemical_list)
-        if evidence_list:
-            params["evidenceList"] = "|".join(evidence_list)
+    async def get_interaction_facets(self, query: str, interaction_types: Optional[List[str]] = None) -> Dict:
+        """Get interaction statistics and metadata"""
+        try:
+            params = {"query": query}
+            if interaction_types:
+                params["interactionTypesFilter"] = ",".join(interaction_types)
             
-        return await self._make_request("interactions", params)
+            return await self._make_request("findInteractionFacets", params)
+        except Exception as e:
+            BioChatLogger.log_error(f"IntAct facets error: {str(e)}", e)
+            return {"error": str(e)}
 
-    async def get_disease_interactions(self,
-                                    gene_list: List[str],
-                                    throughput_tag: Optional[str] = None,
-                                    evidence_list: Optional[List[str]] = None) -> Dict:
-        """Get disease-related interactions"""
-        params = {
-            "geneList": "|".join(gene_list),
-            "format": "json",
-            "accessKey": self.api_key
-        }
-        if throughput_tag:
-            params["throughputTag"] = throughput_tag
-        if evidence_list:
-            params["evidenceList"] = "|".join(evidence_list)
+
+class PharmGKBClient(BioDatabaseAPI):
+    """
+    Enhanced PharmGKB API client with proper name-to-ID resolution.
+    Uses the query endpoints first to get IDs, then fetches details.
+    """
+    def __init__(self):
+        super().__init__()
+        self.base_url = "https://api.pharmgkb.org/v1"
+        self.headers = {"Content-Type": "application/json"}
+
+    async def search(self, query: str) -> Dict[str, Any]:
+        """
+        Implements required abstract method. Searches across chemical, drug labels, and pathways.
+        """
+        try:
+            results = {
+                "chemicals": await self.search_chemical_by_name(query),
+                "drug_labels": await self.search_drug_labels_by_name(query),
+                "pathways": await self.search_pathway_by_name(query)
+            }
+            return results
+        except Exception as e:
+            BioChatLogger.log_error(f"PharmGKB search error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def search_chemical_by_name(self, name: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Search for chemicals by name, returns a list of matches.
+        Returns empty list if no matches found.
+        """
+        try:
+            params = {
+                "name": name,
+                "view": view
+            }
+            response = await self._make_request("data/chemical", params)
             
-        return await self._make_request("interactions", params)
+            if isinstance(response, list):
+                return response
+            elif isinstance(response, dict) and "error" in response:
+                BioChatLogger.log_info(f"No chemical found for name: {name}")
+                return []
+            return []
+            
+        except Exception as e:
+            # Don't treat 404 as error for searches - it just means no results
+            if "404" in str(e):
+                BioChatLogger.log_info(f"No chemical found for name: {name}")
+                return []
+            BioChatLogger.log_error(f"PharmGKB chemical search error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def get_chemical_by_id(self, pharmgkb_id: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Get chemical details by PharmGKB ID.
+        """
+        try:
+            params = {"view": view}
+            return await self._make_request(f"data/chemical/{pharmgkb_id}", params)
+        except Exception as e:
+            BioChatLogger.log_error(f"PharmGKB get chemical error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def search_drug_labels_by_name(self, name: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Search drug labels by name.
+        """
+        try:
+            params = {
+                "relatedChemicals.name": name,
+                "view": view
+            }
+            response = await self._make_request("data/label", params)
+            
+            if isinstance(response, list):
+                return response
+            return []
+            
+        except Exception as e:
+            if "404" in str(e):
+                BioChatLogger.log_info(f"No drug labels found for name: {name}")
+                return []
+            BioChatLogger.log_error(f"PharmGKB drug label search error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def get_drug_label_by_id(self, pharmgkb_id: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Get drug label details by PharmGKB ID.
+        """
+        try:
+            params = {"view": view}
+            return await self._make_request(f"data/label/{pharmgkb_id}", params)
+        except Exception as e:
+            BioChatLogger.log_error(f"PharmGKB get drug label error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def search_pathway_by_name(self, name: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Search pathways by name.
+        """
+        try:
+            params = {
+                "name": name,
+                "view": view
+            }
+            response = await self._make_request("data/pathway", params)
+            
+            if isinstance(response, list):
+                return response
+            return []
+            
+        except Exception as e:
+            if "404" in str(e):
+                BioChatLogger.log_info(f"No pathways found for name: {name}")
+                return []
+            BioChatLogger.log_error(f"PharmGKB pathway search error: {str(e)}", e)
+            return {"error": str(e)}
+
+    async def get_pathway_by_id(self, pharmgkb_id: str, view: str = "base") -> Dict[str, Any]:
+        """
+        Get pathway details by PharmGKB ID.
+        """
+        try:
+            params = {"view": view}
+            return await self._make_request(f"data/pathway/{pharmgkb_id}", params)
+        except Exception as e:
+            BioChatLogger.log_error(f"PharmGKB get pathway error: {str(e)}", e)
+            return {"error": str(e)}
+
 
 class BioCyc(BioDatabaseAPI):
     """Client for BioCyc pathway/genome database"""
