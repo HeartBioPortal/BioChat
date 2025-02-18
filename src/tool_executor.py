@@ -46,7 +46,7 @@ class ToolExecutor:
             self.uniprot = UniProtAPI()
             
             # Optional APIs (initialized based on available credentials)
-            self.string_db = StringDBClient() if biogrid_access_key else None
+            # self.string_db = StringDBClient()
             self.reactome = ReactomeClient()
             self.intact = IntActClient()
             self.pharmgkb = PharmGKBClient()
@@ -88,7 +88,6 @@ class ToolExecutor:
                 "search_variants": self._execute_variant_search,
                 "search_gwas": self._execute_gwas_search,
                 "get_protein_info": self._execute_protein_info,
-                "get_string_interactions": self._execute_string_interactions,
                 "get_biogrid_interactions": self._execute_biogrid_interactions,
                 "get_biogrid_chemical_interactions": self._execute_biogrid_chemical_interactions,
                 "get_intact_interactions": self._execute_intact_interactions,
@@ -100,7 +99,11 @@ class ToolExecutor:
                 "search_pathway": self.execute_pharmgkb_search_pathway,
                 "search_clinical_annotation": self.execute_pharmgkb_search_clinical_annotation,
                 "get_variant_annotation": self.execute_pharmgkb_get_variant_annotation,
-                "get_pharmgkb_annotations": self._execute_pharmgkb_annotations  # Added this line
+                "get_pharmgkb_annotations": self._execute_pharmgkb_annotations,
+                "search_chembl": self._execute_chembl_search,
+                "get_chembl_compound_details": self._execute_chembl_compound_details,
+                "get_chembl_bioactivities": self._execute_chembl_bioactivities,
+                "get_chembl_target_info": self._execute_chembl_target_info
             }
             
             handler = handlers.get(function_name)
@@ -261,7 +264,6 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"PharmGKB get variant annotation error: {str(e)}")
             return {"error": str(e)}
-
 
 
     async def _execute_string_interactions(self, arguments: Dict) -> Dict:
@@ -554,37 +556,130 @@ class ToolExecutor:
             
             return results
 
-    async def _execute_target_analysis(self, arguments: Dict) -> Dict:
-            """Execute comprehensive target analysis using Open Targets"""
-            params = TargetAnalysisParams(**arguments)
-            try:
-                # Get basic target information
-                target_info = await self.open_targets.get_target_info(params.target_id)
-                
-                results = {
-                    "target_info": target_info,
-                    "associations": await self.open_targets.get_target_disease_associations(
-                        target_id=params.target_id,
-                        score_min=params.min_association_score
-                    )
-                }
-                
-                # Add optional information
-                if params.include_safety:
-                    results["safety"] = await self.open_targets.get_target_safety(params.target_id)
-                    
-                if params.include_drugs:
-                    results["drugs"] = await self.open_targets.get_known_drugs(params.target_id)
-                    
-                if params.include_expression:
-                    results["expression"] = await self.open_targets.get_target_expression(params.target_id)
-                
-                return results
-                
-            except Exception as e:
-                logger.error(f"Target analysis error: {e}")
-                return {"error": f"Target analysis failed: {str(e)}"}
+    async def _execute_chembl_search(self, arguments: dict) -> dict:
+        """
+        Execute a ChEMBL compound search.
+        """
+        try:
+            from src.schemas import ChemblSearchParams
+            params = ChemblSearchParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            results = await chembl_client.search(params.query)
+            return results
+        except Exception as e:
+            return {"error": str(e)}
 
+    async def _execute_chembl_compound_details(self, arguments: dict) -> dict:
+        """
+        Retrieve detailed compound information from ChEMBL.
+        """
+        try:
+            from src.schemas import ChemblCompoundDetailsParams
+            params = ChemblCompoundDetailsParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            results = await chembl_client.get_compound_details(params.molecule_chembl_id)
+            return results
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _execute_chembl_bioactivities(self, arguments: dict) -> dict:
+        """
+        Retrieve bioactivity data from ChEMBL.
+        """
+        try:
+            from src.schemas import ChemblBioactivitiesParams
+            params = ChemblBioactivitiesParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            results = await chembl_client.get_bioactivities(params.molecule_chembl_id, limit=params.limit)
+            return results
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _execute_chembl_target_info(self, arguments: dict) -> dict:
+        """
+        Retrieve target information from ChEMBL.
+        """
+        try:
+            from src.schemas import ChemblTargetInfoParams
+            params = ChemblTargetInfoParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            results = await chembl_client.get_target_info(params.target_chembl_id)
+            return results
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _execute_target_analysis(self, arguments: Dict) -> Dict:
+        """Execute comprehensive target analysis using Open Targets with better error handling"""
+        try:
+            params = TargetAnalysisParams(**arguments)
+            
+            # Get target info with all necessary data in a single query
+            target_response = await self.open_targets.get_target_info(params.target_id)
+            
+            # Early return if there's an error
+            if "error" in target_response:
+                BioChatLogger.log_error(f"Failed to get target info: {target_response['error']}")
+                return target_response
+                
+            target_data = target_response.get('target', {})
+            if not target_data:
+                return {"error": "No target data found", "target_id": params.target_id}
+            
+            # Extract and structure the data
+            drugs_data = target_data.get('knownDrugs', {})
+            safety_data = target_data.get('safetyEffects', [])
+            
+            structured_response = {
+                "target_id": params.target_id,
+                "target_info": {
+                    "name": target_data.get('approvedName'),
+                    "symbol": target_data.get('approvedSymbol'),
+                    "biotype": target_data.get('biotype')
+                },
+                "drug_data": {
+                    "count": drugs_data.get('count', 0),
+                    "drugs": [
+                        {
+                            "name": drug.get('drug', {}).get('name'),
+                            "phase": drug.get('phase'),
+                            "status": drug.get('status'),
+                            "mechanism": drug.get('mechanismOfAction'),
+                            "disease": drug.get('disease', {}).get('name'),
+                            "type": drug.get('drug', {}).get('drugType')
+                        }
+                        for drug in drugs_data.get('rows', [])
+                    ]
+                },
+                "safety_data": [
+                    {
+                        "event": effect.get('event'),
+                        "effects": effect.get('effects', [])
+                    }
+                    for effect in safety_data
+                ]
+            }
+            
+            # Save complete response
+            file_path = self.save_api_response("opentargets_target", structured_response)
+            BioChatLogger.log_info(f"Saved OpenTargets response to {file_path}")
+            
+            return {
+                "success": True,
+                "data": structured_response,
+                "file_path": file_path
+            }
+            
+        except Exception as e:
+            BioChatLogger.log_error("Target analysis error", e)
+            return {
+                "error": str(e),
+                "target_id": params.target_id if params else arguments.get("target_id")
+            }
+    
     async def _execute_disease_analysis(self, arguments: Dict) -> Dict:
         try:
             params = DiseaseAnalysisParams(**arguments)
