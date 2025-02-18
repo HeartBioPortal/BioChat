@@ -1,19 +1,22 @@
+"""
+Module for orchestrating interactions between user queries and biological database APIs.
+Handles query processing, API calls, and response synthesis.
+"""
+
 from typing import List, Dict, Optional
 import json
 from openai import AsyncOpenAI
 from src.utils.biochat_api_logging import BioChatLogger
+from src.utils.summarizer import ResponseSummarizer
 from src.schemas import BIOCHAT_TOOLS
 from src.tool_executor import ToolExecutor
 import logging
 import os
 from datetime import datetime
 
-
-
 logger = logging.getLogger(__name__)
 API_RESULTS_DIR = "api_results"
 os.makedirs(API_RESULTS_DIR, exist_ok=True)
-
 
 class BioChatOrchestrator:
     def __init__(self, openai_api_key: str, ncbi_api_key: str, tool_name: str, email: str, biogrid_access_key: str = None):
@@ -21,7 +24,8 @@ class BioChatOrchestrator:
         # Validate required credentials
         if not openai_api_key or not ncbi_api_key or not email:
             raise ValueError("All required credentials must be provided")
-            
+        
+        self.gpt_model = "gpt-4o"
         try:
             self.client = AsyncOpenAI(api_key=openai_api_key)
             self.tool_executor = ToolExecutor(
@@ -31,51 +35,47 @@ class BioChatOrchestrator:
                 biogrid_access_key=biogrid_access_key
             )
             self.conversation_history = []
+            self.summarizer = ResponseSummarizer()
         except Exception as e:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
 
-
     def summarize_api_response(self, tool_name: str, response: Dict) -> str:
-        """Summarize API response to reduce token count."""
-        summary = []
-        
+        """Summarize API response to reduce token count using the ResponseSummarizer."""
         if "error" in response:
             return f"{tool_name}: Error - {response['error']}"
             
-        if tool_name == "biogrid_chemical_interactions":
-            if response.get("success"):
-                interactions = response.get("data", {})
-                chemical_list = response.get("chemical_list", [])
-                count = response.get("interaction_count", 0)
-                summary.append(f"Found {count} interactions for chemicals: {', '.join(chemical_list)}")
-                # Include only essential interaction data
-                if count > 0:
-                    summary.append("Top interactions:")
-                    for i, interaction in enumerate(list(interactions.values())[:5]):  # Only show top 5
-                        summary.append(f"- {interaction.get('interactorA')} <-> {interaction.get('interactorB')}")
-            else:
-                summary.append(f"No interactions found for chemicals: {', '.join(response.get('chemical_list', []))}")
-                
-        elif tool_name == "intact_interactions":
-            if response.get("success"):
-                data = response.get("data", {})
-                query = response.get("query", "")
-                count = response.get("interaction_count", 0)
-                summary.append(f"Found {count} interactions for query: {query}")
-                # Include only essential interaction data
-                content = data.get("content", [])
-                if content:
-                    summary.append("Top interactions:")
-                    for interaction in content[:5]:  # Only show top 5
-                        summary.append(f"- {interaction.get('interactorA')} <-> {interaction.get('interactorB')}")
-            else:
-                summary.append(f"No interactions found for query: {response.get('query', '')}")
-                
-        # Add similar summarization for other API responses
+        # Map tool names to API names for summarizer
+        api_mapping = {
+            "biogrid_chemical_interactions": "biogrid",
+            "intact_interactions": "intact",
+            "analyze_target": "opentargets"
+        }
         
-        return "\n".join(summary)
-
+        api_name = api_mapping.get(tool_name)
+        if api_name:
+            try:
+                # Special handling for OpenTargets successful responses
+                if api_name == "opentargets" and response.get("success") and response.get("data"):
+                    data = response["data"]
+                    drug_data = data.get("drug_data", {})
+                    
+                    # Create a more focused summary
+                    summary = {
+                        "target_info": data.get("target_info", {}),
+                        "drug_count": drug_data.get("count", 0),
+                        "drugs": drug_data.get("drugs", []),
+                        "safety_data": data.get("safety_data", [])
+                    }
+                    return json.dumps(summary, indent=2)
+                    
+                summary = self.summarizer.summarize_response(api_name, response)
+                return json.dumps(summary, indent=2)
+            except Exception as e:
+                logger.error(f"Summarization error for {tool_name}: {str(e)}")
+                return str(response)  # Return original response if summarization fails
+        
+        return str(response)  # Return original response for unmapped tools
 
     async def process_query(self, user_query: str) -> str:
         """Process a user query with comprehensive database searches for multiple compounds."""
@@ -83,30 +83,12 @@ class BioChatOrchestrator:
         self.conversation_history.append({"role": "user", "content": user_query})
 
         messages = [
-            {"role": "system", "content": """For each chemical compound in the query:
-            1. Search ALL of these databases and collect ALL available information:
-            - PharmGKB for pharmacogenomic data
-            - OpenTargets for drug/target information
-            - STRING-DB for chemical-protein interactions
-            - BioGRID for chemical-protein interactions
-            - NCBI PubMed for research literature
-            2. Make ALL necessary API calls at once in your first response
-            3. Process ALL compounds in parallel
-            4. Return complete tool calls for ALL databases for ALL compounds
-            5. Wait for ALL results before synthesis
-            
-            Important:
-            - Do not make sequential API calls
-            - Request ALL needed data in your first response
-            - Process ALL compounds together
-            - Search ALL databases for each compound
-            """},
-            *self.conversation_history
+            {"role": "system", "content": self._create_system_message()}, *self.conversation_history
         ]
 
         # Get all tool calls at once
         initial_completion = await self.client.chat.completions.create(
-            model="gpt-4o",
+            model=self.gpt_model,
             messages=messages,
             tools=BIOCHAT_TOOLS,
             tool_choice="auto"
@@ -142,18 +124,19 @@ class BioChatOrchestrator:
                     
                     # Store response and add to conversation history
                     tool_results[tool_call.id] = function_response
-                    function_response = self.summarize_api_response(tool_call.function.name, function_response)
+                    summarized_response = self.summarize_api_response(tool_call.function.name, function_response)
+                    
                     # Add to API responses if contains actual data
-                    if function_response and not (isinstance(function_response, dict) and 
-                        ("error" in function_response or 
-                        function_response.get("matches", []) == [] or 
-                        function_response.get("count", 0) == 0)):
-                        api_responses[tool_call.function.name] = function_response
+                    if summarized_response and not (isinstance(summarized_response, dict) and 
+                        ("error" in summarized_response or 
+                        summarized_response.get("matches", []) == [] or 
+                        summarized_response.get("count", 0) == 0)):
+                        api_responses[tool_call.function.name] = summarized_response
                     
                     # Always add tool response to conversation history
                     self.conversation_history.append({
                         "role": "tool",
-                        "content": json.dumps(function_response if function_response else {"result": "No data found"}),
+                        "content": summarized_response if summarized_response else "No data found",
                         "tool_call_id": tool_call.id
                     })
                     
@@ -190,7 +173,7 @@ class BioChatOrchestrator:
                     scientific_context += f"\n## {compound}:\n"
                     for tool_name, result in results.items():
                         scientific_context += f"\n### {tool_name}:\n"
-                        scientific_context += f"{json.dumps(result, indent=2)}\n"
+                        scientific_context += f"{result}\n"
 
             # Generate final synthesis with all data
             messages = [
@@ -200,7 +183,7 @@ class BioChatOrchestrator:
             ]
 
             final_completion = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.gpt_model,
                 messages=messages
             )
 
@@ -243,7 +226,7 @@ class BioChatOrchestrator:
             ]
 
             completion = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.gpt_model,
                 messages=messages,
                 tools=BIOCHAT_TOOLS,
                 tool_choice="auto",
