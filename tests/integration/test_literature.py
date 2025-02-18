@@ -7,8 +7,7 @@ from tests.utils.logger import test_logger
 async def test_complex_query(integration_orchestrator, clear_conversation_history):
     """Test handling of a complex technical query"""
     # query = """ find protein and genes related to HDL Cholesterol especially in Native Hawaiian and Pacific Islander Populations"""
-    query = """ What can you tell me about any of these compounds C.I. Acid Blue 3, Estrone glucuronide, Trisjuglone, ETC-159, clorsulon,
-      GSK2837808A, JW-55"""
+    query = """What are the top compounds that target CD47 in cardio vascular and renal, metabolic diseases?"""
     
     response = await integration_orchestrator.process_query(query)
     
