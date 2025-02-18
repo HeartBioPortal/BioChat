@@ -8,6 +8,7 @@ class LiteratureSearchParams(BaseModel):
         description="List of gene names or symbols to search for"
     )
     phenotypes: List[str] = Field(
+        default_factory=list,
         description="List of phenotypes or diseases to search for"
     )
     additional_terms: List[str] = Field(
@@ -29,14 +30,14 @@ class LiteratureSearchParams(BaseModel):
     @classmethod
     def validate_search_terms(cls, values):
         """Ensure at least one search term is provided"""
-        genes = values.get('genes', [])
-        phenotypes = values.get('phenotypes', [])
-        additional_terms = values.get('additional_terms', [])
-        if not any([genes, phenotypes, additional_terms]):
+        # Convert None to empty lists for optional fields
+        values['genes'] = values.get('genes') or []
+        values['phenotypes'] = values.get('phenotypes') or []
+        values['additional_terms'] = values.get('additional_terms') or []
+        
+        if not any([values['genes'], values['phenotypes'], values['additional_terms']]):
             raise ValueError("At least one search term must be provided")
         return values
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class VariantSearchParams(BaseModel):
     """Parameters for variant search queries"""
@@ -238,6 +239,33 @@ class StringDBEnrichmentParams(BaseModel):
     background_identifiers: Optional[List[str]] = Field(None, description="Custom background set")
 
 
+class ChemblSearchParams(BaseModel):
+    """
+    Parameters for searching compounds using the ChEMBL API.
+    The query represents a gene, protein, or compound name.
+    """
+    query: str = Field(..., description="Search query for ChEMBL compounds")
+
+
+class ChemblCompoundDetailsParams(BaseModel):
+    """
+    Parameters for retrieving compound details from ChEMBL.
+    """
+    molecule_chembl_id: str = Field(..., description="ChEMBL molecule identifier")
+
+class ChemblBioactivitiesParams(BaseModel):
+    """
+    Parameters for retrieving bioactivity data from ChEMBL.
+    """
+    molecule_chembl_id: str = Field(..., description="ChEMBL molecule identifier")
+    limit: int = Field(20, description="Maximum number of bioactivity records to return", ge=1, le=100)
+
+class ChemblTargetInfoParams(BaseModel):
+    """
+    Parameters for retrieving target information from ChEMBL.
+    """
+    target_chembl_id: str = Field(..., description="ChEMBL target identifier")
+
 
 # Update the problematic tool definition in BIOCHAT_TOOLS
 BIOCHAT_TOOLS = [
@@ -283,6 +311,38 @@ BIOCHAT_TOOLS = [
             "description": "Get protein-protein interactions from STRING-DB.",
             "parameters": StringDBEnrichmentParams.model_json_schema(),
             "required": ["identifiers"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_chembl",
+            "description": "Search for chemical compounds using the ChEMBL API based on a gene, protein, or compound name.",
+            "parameters": ChemblSearchParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_chembl_compound_details",
+            "description": "Retrieve detailed compound information from ChEMBL using a ChEMBL molecule ID.",
+            "parameters": ChemblCompoundDetailsParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_chembl_bioactivities",
+            "description": "Retrieve bioactivity data from ChEMBL for a given molecule.",
+            "parameters": ChemblBioactivitiesParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_chembl_target_info",
+            "description": "Retrieve target information from ChEMBL using a ChEMBL target ID.",
+            "parameters": ChemblTargetInfoParams.model_json_schema()
         }
     },
     {
