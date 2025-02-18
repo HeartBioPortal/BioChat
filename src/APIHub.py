@@ -22,14 +22,6 @@ class BioDatabaseAPI(ABC):
     """Abstract base class for biological database APIs."""
     
     def __init__(self, api_key: Optional[str] = None, tool: Optional[str] = None, email: Optional[str] = None):
-        """
-        Initialize the base API client.
-        
-        Args:
-            api_key: Optional API key for authentication
-            tool: Optional tool name for identification
-            email: Optional email for contact purposes
-        """
         self.api_key = api_key
         self.tool = tool
         self.email = email
@@ -42,12 +34,11 @@ class BioDatabaseAPI(ABC):
     async def _init_session(self):
         """Initialize aiohttp session if not exists"""
         if self.session is None or self.session.closed:
-            # Create connection with proper timeouts
             timeout = aiohttp.ClientTimeout(total=30, connect=10)
             conn = aiohttp.TCPConnector(
-                ssl=False,  # Disable SSL verification for testing
-                limit=10,   # Limit concurrent connections
-                force_close=True  # Force connection closure
+                ssl=False,
+                limit=10,
+                force_close=True
             )
             self.session = aiohttp.ClientSession(
                 connector=conn,
@@ -59,52 +50,91 @@ class BioDatabaseAPI(ABC):
         if self.session and not self.session.closed:
             await self.session.close()
             self.session = None
-    
 
-    async def _make_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> Dict:
-        """Enhanced request method with SSL verification handling."""
+    async def _make_request(self, endpoint: str, params: Dict = None, method: str = "GET", 
+                           json_data: Dict = None, delay: float = 0.34) -> Dict:
+        """Enhanced request method with support for different HTTP methods."""
         max_retries = 3
         retry_delay = 1
-
-        session_created = False  
-        ssl_context = ssl.create_default_context()  # ✅ Create a secure SSL context
-
+        session_created = False
+        
         for attempt in range(max_retries):
             try:
-                if not hasattr(self, "session") or self.session is None or self.session.closed:
-                    self.session = aiohttp.ClientSession()
-                    session_created = True  
-                
+                if not self.session or self.session.closed:
+                    await self._init_session()
+                    session_created = True
+                    
                 await asyncio.sleep(delay)
                 url = f"{self.base_url}/{endpoint}"
-
-                async with self.session.get(url, headers=self.headers, params=params, ssl=ssl_context) as response:
-                    if response.status == 429:  # Rate limit
-                        retry_after = int(response.headers.get('Retry-After', retry_delay))
-                        await asyncio.sleep(retry_after)
-                        continue
-                    response.raise_for_status()
-                    response_text = await response.text()
-                    try:
-                        return json.loads(response_text)
-                    except json.JSONDecodeError:
-                        BioChatLogger.log_error("Failed to decode STRING-DB response", Exception(response_text[:500]))
-                        return None
+                
+                request_kwargs = {
+                    "headers": self.headers,
+                    "params": params,
+                    "ssl": False
+                }
+                if json_data is not None:
+                    request_kwargs["json"] = json_data
+                
+                if method.upper() == "GET":
+                    async with self.session.get(url, **request_kwargs) as response:
+                        await self._handle_response(response)
+                        return await self._parse_response(response)
+                elif method.upper() == "POST":
+                    async with self.session.post(url, **request_kwargs) as response:
+                        await self._handle_response(response)
+                        return await self._parse_response(response)
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
                     
             except aiohttp.ClientError as e:
                 BioChatLogger.log_error(f"API request error", e)
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(retry_delay * (attempt + 1))
-                    
+                
             except Exception as e:
                 BioChatLogger.log_error(f"Unexpected error in API request", e)
                 raise
-
+                
             finally:
                 if session_created and self.session and not self.session.closed:
-                    await self.session.close()
+                    await self._close_session()
 
+    async def _handle_response(self, response: aiohttp.ClientResponse) -> None:
+        """Handle common response scenarios."""
+        if response.status == 429:
+            retry_after = int(response.headers.get('Retry-After', 5))
+            await asyncio.sleep(retry_after)
+            raise aiohttp.ClientError("Rate limit exceeded")
+        response.raise_for_status()
+
+    async def _parse_response(self, response: aiohttp.ClientResponse) -> Dict:
+        """Parse response content based on content type."""
+        content_type = response.headers.get('Content-Type', '')
+        
+        try:
+            if 'application/json' in content_type:
+                return await response.json()
+            elif 'text/html' in content_type:
+                text = await response.text()
+                BioChatLogger.log_error("Received HTML response", Exception(text[:500]))
+                raise ValueError("Received HTML response instead of expected JSON")
+            else:
+                text = await response.text()
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    BioChatLogger.log_error("Failed to decode the response", Exception(text[:500]))
+                    raise ValueError("Failed to decode response")
+                    
+        except Exception as e:
+            BioChatLogger.log_error("Response parsing error", e)
+            raise
+
+    @abstractmethod
+    async def search(self, query: str) -> Dict:
+        """Base search method to be implemented by child classes."""
+        pass
 
     async def __aenter__(self):
         await self._init_session()
@@ -112,25 +142,6 @@ class BioDatabaseAPI(ABC):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._close_session()
-    
-    @abstractmethod
-    async def search(self, query: str) -> Dict:
-        """Base search method to be implemented by child classes."""
-        pass
-
-    async def _make_raw_request(self, endpoint: str, params: Dict = None, delay: float = 0.34) -> str:
-        """Make request and return raw text response"""
-        await self._init_session()
-        await asyncio.sleep(delay)
-        
-        url = f"{self.base_url}/{endpoint}"
-        try:
-            async with self.session.get(url, headers=self.headers, params=params) as response:
-                response.raise_for_status()
-                return await response.text()
-        except Exception as e:
-            BioChatLogger.log_error(f"Raw request error", e)
-            raise
 
 
 class NCBIEutils(BioDatabaseAPI):
@@ -557,6 +568,58 @@ class ReactomeClient(BioDatabaseAPI):
         except Exception as e:
             BioChatLogger.log_error(f"Error getting disease events for {disease_id}", e)
             return {"error": str(e)}
+
+
+class ChemblAPI(BioDatabaseAPI):
+    """
+    Client for accessing the ChEMBL API.
+    Provides methods to search compounds, fetch detailed compound info, bioactivities, and target data.
+    Documentation: https://chembl.gitbook.io/chembl-interface-documentation/web-services/chembl-data-web-services
+    """
+    def __init__(self):
+        # ChEMBL public endpoints do not require an API key
+        super().__init__()
+        self.base_url = "https://www.ebi.ac.uk/chembl/api/data"
+    
+    async def search(self, query: str) -> dict:
+        """
+        Search for compounds in ChEMBL using a simple name lookup.
+        The query is assumed to be a gene, protein, or compound name.
+        """
+        # For a simple search, pass the query directly. The ChEMBL API will interpret it accordingly.
+        params = {
+            "format": "json",
+            "query": query
+        }
+        return await self._make_request("molecule", params=params)
+
+    async def get_compound_details(self, molecule_chembl_id: str) -> dict:
+        """
+        Retrieve detailed compound information for a given ChEMBL molecule ID.
+        """
+        params = {"format": "json"}
+        endpoint = f"molecule/{molecule_chembl_id}"
+        return await self._make_request(endpoint, params=params)
+
+    async def get_bioactivities(self, molecule_chembl_id: str, limit: int = 20) -> dict:
+        """
+        Retrieve bioactivity data for a given ChEMBL molecule ID.
+        """
+        params = {
+            "format": "json",
+            "molecule_chembl_id": molecule_chembl_id,
+            "limit": limit
+        }
+        return await self._make_request("activity", params=params)
+
+    async def get_target_info(self, target_chembl_id: str) -> dict:
+        """
+        Retrieve target information from ChEMBL using a ChEMBL target ID.
+        """
+        params = {"format": "json"}
+        endpoint = f"target/{target_chembl_id}"
+        return await self._make_request(endpoint, params=params)
+
 
 class BioGridClient(BioDatabaseAPI):
     """Enhanced BioGRID client specifically for chemical interactions."""
@@ -997,66 +1060,353 @@ class UniProtAPI(BioDatabaseAPI):
             return {"error": str(e)}
 
 
-class OpenTargetsClient:
-    """Client for interacting with Open Targets Platform API"""
+class OpenTargetsClient(BioDatabaseAPI):
+    """Client for interacting with Open Targets Platform GraphQL API"""
     
     def __init__(self):
-        self.base_url = "https://platform.opentargets.org/api/public"
-        self.headers = {"Content-Type": "application/json"}
+        super().__init__()
+        self.base_url = "https://api.platform.opentargets.org/api/v4/graphql"
+        self.headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+    async def _execute_query(self, query: str, variables: Optional[Dict] = None) -> Dict:
+        """Execute a GraphQL query"""
+        try:
+            payload = {
+                "query": query,
+                "variables": variables or {}
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.base_url, json=payload, headers=self.headers) as response:
+                    if response.status == 429:  # Rate limit
+                        retry_after = int(response.headers.get('Retry-After', 5))
+                        await asyncio.sleep(retry_after)
+                        return await self._execute_query(query, variables)
+                        
+                    response.raise_for_status()
+                    result = await response.json()
+                    
+                    if "errors" in result:
+                        raise Exception(f"GraphQL errors: {result['errors']}")
+                        
+                    return result.get("data", {})
+                    
+        except aiohttp.ClientError as e:
+            BioChatLogger.log_error("OpenTargets API request error", e)
+            raise
+        except Exception as e:
+            BioChatLogger.log_error("OpenTargets query error", e)
+            raise
 
     async def search(self, query: str, entity: str = None, size: int = 10) -> Dict:
         """Search across targets, diseases, and drugs"""
-        params = {
-            "q": query,
+        search_query = """
+        query SearchQuery($searchQuery: String!, $entity: String, $size: Int) {
+            search(queryString: $searchQuery, entityNames: [$entity], size: $size) {
+                total
+                hits {
+                    id
+                    entity
+                    object {
+                        id
+                        name
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {
+            "searchQuery": query,
+            "entity": entity,
             "size": size
         }
-        if entity:
-            params["entity"] = entity
-            
-        response = await self._make_request("search", params=params)
-        return response
+        
+        try:
+            return await self._execute_query(search_query, variables)
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets search error", e)
+            return {"error": str(e)}
 
     async def get_target_info(self, target_id: str) -> Dict:
         """Get detailed information about a target"""
-        response = await self._make_request(f"target/{target_id}")
-        return response
+        # Updated query to match schema
+        target_query = """
+        query TargetQuery($targetId: String!) {
+            target(ensemblId: $targetId) {
+                id
+                approvedSymbol
+                approvedName
+                biotype
+                knownDrugs(size: 20) {
+                    count
+                    rows {
+                        phase
+                        status
+                        mechanismOfAction
+                        disease {
+                            id
+                            name
+                        }
+                        drug {
+                            id
+                            name
+                            drugType
+                            maximumClinicalTrialPhase
+                        }
+                    }
+                }
+                safetyLiabilities {
+                    event
+                    eventId
+                    effects {
+                        direction
+                        dosing
+                    }
+                    biosamples {
+                        tissueLabel
+                        tissueId
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            BioChatLogger.log_info(f"Querying OpenTargets for target: {target_id}")
+            result = await self._execute_query(target_query, {"targetId": target_id})
+            
+            if not result or "target" not in result:
+                error_msg = "No target data found"
+                BioChatLogger.log_error(error_msg, Exception(error_msg))
+                return {"error": error_msg, "target_id": target_id}
+            
+            return result
+            
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets target info error", e)
+            return {"error": str(e), "target_id": target_id}
 
     async def get_disease_info(self, disease_id: str) -> Dict:
         """Get detailed information about a disease"""
-        response = await self._make_request(f"disease/{disease_id}")
-        return response
+        disease_query = """
+        query DiseaseQuery($diseaseId: String!) {
+            disease(efoId: $diseaseId) {
+                id
+                name
+                description
+                therapeuticAreas {
+                    id
+                    name
+                }
+            }
+        }
+        """
+        
+        try:
+            return await self._execute_query(disease_query, {"diseaseId": disease_id})
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets disease info error", e)
+            return {"error": str(e)}
 
     async def get_target_disease_associations(self, 
-        target_id: str = None,
-        disease_id: str = None,
-        score_min: float = 0.0,
-        size: int = 10
-    ) -> Dict:
+                                           target_id: str = None,
+                                           disease_id: str = None,
+                                           score_min: float = 0.0,
+                                           size: int = 10) -> Dict:
         """Get associations between targets and diseases"""
-        payload = {
-            "scorevalue_min": score_min,
+        association_query = """
+        query AssociationsQuery($targetId: String, $diseaseId: String, $scoreMin: Float, $size: Int) {
+            associatedDiseases(
+                ensemblId: $targetId,
+                efoId: $diseaseId,
+                datasourceScoreMin: $scoreMin,
+                size: $size
+            ) {
+                count
+                rows {
+                    disease {
+                        id
+                        name
+                    }
+                    score
+                    datatypeScores {
+                        id
+                        score
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {
+            "targetId": target_id,
+            "diseaseId": disease_id,
+            "scoreMin": score_min,
             "size": size
         }
-        if target_id:
-            payload["target"] = target_id
-        if disease_id:
-            payload["disease"] = disease_id
+        
+        try:
+            return await self._execute_query(association_query, variables)
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets association error", e)
+            return {"error": str(e)}
 
-        response = await self._make_request("association/filter", method="POST", json=payload)
-        return response
+
+    async def _execute_query(self, query: str, variables: Optional[Dict] = None) -> Dict:
+            """Execute a GraphQL query with proper error handling"""
+            try:
+                payload = {
+                    "query": query,
+                    "variables": variables or {}
+                }
+                
+                # Use aiohttp session for requests
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.base_url,
+                        json=payload,
+                        headers=self.headers,
+                        raise_for_status=True
+                    ) as response:
+                        result = await response.json()
+                        
+                        if "errors" in result:
+                            raise Exception(f"GraphQL errors: {result['errors']}")
+                        
+                        if "data" not in result:
+                            raise Exception("No data in response")
+                            
+                        return result.get("data", {})
+                        
+            except aiohttp.ClientError as e:
+                BioChatLogger.log_error("OpenTargets API request error", e)
+                raise
+            except Exception as e:
+                BioChatLogger.log_error("OpenTargets query error", e)
+                raise
 
     async def get_target_safety(self, target_id: str) -> Dict:
         """Get safety information for a target"""
-        response = await self._make_request(f"target/{target_id}/safety")
-        return response
+        query = """
+        query TargetSafety($targetId: String!) {
+            target(ensemblId: $targetId) {
+                id
+                safetyLiabilities {
+                    biosamples {
+                        tissueLabel
+                        tissueId
+                        cellLabel
+                        cellFormat
+                        cellId
+                    }
+                    effects {
+                        direction
+                        dosing
+                    }
+                    event
+                    eventId
+                    datasource
+                    literature
+                    studies {
+                        name
+                        description
+                        type
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            result = await self._execute_query(query, {"targetId": target_id})
+            return result.get("target", {}).get("safetyLiabilities", [])
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets target safety error", e)
+            return {"error": str(e)}
 
     async def get_known_drugs(self, target_id: str, size: int = 10) -> Dict:
         """Get known drugs for a target"""
-        params = {"size": size}
-        response = await self._make_request(f"target/{target_id}/known_drugs", params=params)
-        return response
+        query = """
+        query TargetDrugs($targetId: String!, $size: Int!) {
+            target(ensemblId: $targetId) {
+                id
+                knownDrugs(size: $size) {
+                    count
+                    cursor
+                    rows {
+                        phase
+                        status
+                        mechanismOfAction
+                        disease {
+                            id
+                            name
+                        }
+                        drug {
+                            id
+                            name
+                            drugType
+                            maximumClinicalTrialPhase
+                        }
+                        urls {
+                            url
+                            name
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            result = await self._execute_query(query, {
+                "targetId": target_id,
+                "size": size
+            })
+            return result.get("target", {}).get("knownDrugs", {})
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets known drugs error", e)
+            return {"error": str(e)}
 
     async def get_target_expression(self, target_id: str) -> Dict:
         """Get expression data for a target"""
-        response = await self._make_request(f"target/{target_id}/expression")
-        return response
+        query = """
+        query TargetExpression($targetId: String!) {
+            target(ensemblId: $targetId) {
+                id
+                expressions {
+                    tissue {
+                        id
+                        label
+                        anatomicalSystems
+                        organs
+                    }
+                    rna {
+                        value
+                        unit
+                        level
+                        zscore
+                    }
+                    protein {
+                        level
+                        reliability
+                        cellType {
+                            name
+                            level
+                            reliability
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        try:
+            result = await self._execute_query(query, {"targetId": target_id})
+            return result.get("target", {}).get("expressions", [])
+        except Exception as e:
+            BioChatLogger.log_error(f"OpenTargets expression error", e)
+            return {"error": str(e)}
