@@ -141,7 +141,7 @@ class BioChatOrchestrator:
                     })
                     
                 except Exception as e:
-                    BioChatLogger.log_error(f"API call failed for {tool_call.function.name}: {str(e)}")
+                    BioChatLogger.log_error(f"API call failed for {tool_call.function.name}", e)
                     self.conversation_history.append({
                         "role": "tool",
                         "content": json.dumps({"error": str(e)}),
