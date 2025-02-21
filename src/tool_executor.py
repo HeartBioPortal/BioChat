@@ -89,6 +89,7 @@ class ToolExecutor:
                 "search_gwas": self._execute_gwas_search,
                 "get_protein_info": self._execute_protein_info,
                 "get_biogrid_interactions": self._execute_biogrid_interactions,
+                "get_string_interactions": self._execute_string_interactions,
                 "get_biogrid_chemical_interactions": self._execute_biogrid_chemical_interactions,
                 "get_intact_interactions": self._execute_intact_interactions,
                 "analyze_pathways": self._execute_pathway_analysis,
