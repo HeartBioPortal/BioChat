@@ -104,7 +104,9 @@ class ToolExecutor:
                 "search_chembl": self._execute_chembl_search,
                 "get_chembl_compound_details": self._execute_chembl_compound_details,
                 "get_chembl_bioactivities": self._execute_chembl_bioactivities,
-                "get_chembl_target_info": self._execute_chembl_target_info
+                "get_chembl_target_info": self._execute_chembl_target_info,
+                "search_chembl_similarity": self._execute_chembl_similarity_search,
+                "search_chembl_substructure": self._execute_chembl_substructure_search
             }
             
             handler = handlers.get(function_name)
@@ -513,49 +515,121 @@ class ToolExecutor:
 
     async def _execute_pathway_analysis(self, arguments: Dict) -> Dict:
         """Execute pathway analysis using Reactome"""
-
-        params = PathwayAnalysisParams(**arguments)
-        results = {}
-        
-        if params.genes:
-            BioChatLogger.log_info(f"Analyzing pathways for genes: {params.genes}")
-            for gene in params.genes:
+        try:
+            params = PathwayAnalysisParams(**arguments)
+            results = {}
+            
+            # Check if genes parameter is provided
+            if params.genes and isinstance(params.genes, list):
+                BioChatLogger.log_info(f"Analyzing pathways for genes: {params.genes}")
+                for gene in params.genes:
+                    try:
+                        # Get pathways for gene
+                        BioChatLogger.log_info(f"Getting pathways for gene: {gene}")
+                        pathways = await self.reactome.get_pathways_for_gene(gene)
+                        
+                        if isinstance(pathways, dict) and "error" in pathways:
+                            logger.warning(f"Could not get pathways for gene {gene}: {pathways['error']}")
+                            results[gene] = {
+                                "status": "error",
+                                "message": pathways['error']
+                            }
+                            continue
+                            
+                        if pathways:
+                            results[gene] = {
+                                "status": "success",
+                                "pathways": pathways,
+                                "evidence_strength": "high/medium/low",
+                                "source": "Reactome Database",
+                                "last_updated": datetime.now().isoformat()
+                            }
+                            
+                        else:
+                            results[gene] = {
+                                "status": "no_data",
+                                "message": "No pathways found"
+                            }
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing gene {gene}: {str(e)}")
+                        results[gene] = {
+                            "status": "error",
+                            "message": str(e)
+                        }
+            # Check if gene_id parameter is provided
+            elif params.gene_id:
+                gene = params.gene_id
+                BioChatLogger.log_info(f"Analyzing pathway for single gene: {gene}")
                 try:
-                    # Get pathways for gene
-                    BioChatLogger.log_info(f"Getting pathways for gene: {gene}")
                     pathways = await self.reactome.get_pathways_for_gene(gene)
                     
                     if isinstance(pathways, dict) and "error" in pathways:
-                        logger.warning(f"Could not get pathways for gene {gene}: {pathways['error']}")
                         results[gene] = {
                             "status": "error",
                             "message": pathways['error']
                         }
-                        continue
-                        
-                    if pathways:
+                    elif pathways:
                         results[gene] = {
                             "status": "success",
                             "pathways": pathways,
-                            "evidence_strength": "high/medium/low",
                             "source": "Reactome Database",
                             "last_updated": datetime.now().isoformat()
                         }
-                        
                     else:
                         results[gene] = {
                             "status": "no_data",
                             "message": "No pathways found"
                         }
-                        
                 except Exception as e:
                     logger.error(f"Error processing gene {gene}: {str(e)}")
                     results[gene] = {
                         "status": "error",
                         "message": str(e)
                     }
-            
+            # Check if pathway_id parameter is provided
+            elif params.pathway_id:
+                pathway_id = params.pathway_id
+                BioChatLogger.log_info(f"Getting details for pathway: {pathway_id}")
+                try:
+                    pathway_details = await self.reactome.get_pathway_details(pathway_id)
+                    if pathway_details:
+                        results["pathway_details"] = {
+                            "status": "success",
+                            "pathway_id": pathway_id,
+                            "details": pathway_details,
+                            "source": "Reactome Database",
+                            "last_updated": datetime.now().isoformat()
+                        }
+                    else:
+                        results["pathway_details"] = {
+                            "status": "no_data",
+                            "pathway_id": pathway_id,
+                            "message": "No details found for pathway"
+                        }
+                except Exception as e:
+                    logger.error(f"Error getting details for pathway {pathway_id}: {str(e)}")
+                    results["pathway_details"] = {
+                        "status": "error",
+                        "pathway_id": pathway_id,
+                        "message": str(e)
+                    }
+            else:
+                # No valid parameters provided
+                return {
+                    "status": "error",
+                    "message": "No valid parameters provided. Please specify genes, gene_id, or pathway_id."
+                }
+                
             return results
+            
+        except Exception as e:
+            BioChatLogger.log_error("Pathway analysis error", e)
+            return {
+                "status": "error",
+                "message": f"Pathway analysis failed: {str(e)}",
+                "parameters": arguments
+            }
 
     async def _execute_chembl_search(self, arguments: dict) -> dict:
         """
@@ -566,10 +640,18 @@ class ToolExecutor:
             params = ChemblSearchParams(**arguments)
             from src.APIHub import ChemblAPI
             chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL search for query: {params.query}")
             results = await chembl_client.search(params.query)
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_search", results)
+            BioChatLogger.log_info(f"ChEMBL search results saved to {file_path}")
+            
             return results
         except Exception as e:
-            return {"error": str(e)}
+            BioChatLogger.log_error("ChEMBL search execution error", e)
+            return {"error": str(e), "query": arguments.get("query", "")}
 
     async def _execute_chembl_compound_details(self, arguments: dict) -> dict:
         """
@@ -580,10 +662,18 @@ class ToolExecutor:
             params = ChemblCompoundDetailsParams(**arguments)
             from src.APIHub import ChemblAPI
             chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL compound details for ID: {params.molecule_chembl_id}")
             results = await chembl_client.get_compound_details(params.molecule_chembl_id)
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_compound", results)
+            BioChatLogger.log_info(f"ChEMBL compound details saved to {file_path}")
+            
             return results
         except Exception as e:
-            return {"error": str(e)}
+            BioChatLogger.log_error("ChEMBL compound details execution error", e)
+            return {"error": str(e), "molecule_chembl_id": arguments.get("molecule_chembl_id", "")}
 
     async def _execute_chembl_bioactivities(self, arguments: dict) -> dict:
         """
@@ -594,10 +684,18 @@ class ToolExecutor:
             params = ChemblBioactivitiesParams(**arguments)
             from src.APIHub import ChemblAPI
             chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL bioactivities for ID: {params.molecule_chembl_id} (limit: {params.limit})")
             results = await chembl_client.get_bioactivities(params.molecule_chembl_id, limit=params.limit)
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_bioactivities", results)
+            BioChatLogger.log_info(f"ChEMBL bioactivities data saved to {file_path}")
+            
             return results
         except Exception as e:
-            return {"error": str(e)}
+            BioChatLogger.log_error("ChEMBL bioactivities execution error", e)
+            return {"error": str(e), "molecule_chembl_id": arguments.get("molecule_chembl_id", "")}
 
     async def _execute_chembl_target_info(self, arguments: dict) -> dict:
         """
@@ -608,10 +706,69 @@ class ToolExecutor:
             params = ChemblTargetInfoParams(**arguments)
             from src.APIHub import ChemblAPI
             chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL target info for ID: {params.target_chembl_id}")
             results = await chembl_client.get_target_info(params.target_chembl_id)
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_target", results)
+            BioChatLogger.log_info(f"ChEMBL target information saved to {file_path}")
+            
             return results
         except Exception as e:
-            return {"error": str(e)}
+            BioChatLogger.log_error("ChEMBL target info execution error", e)
+            return {"error": str(e), "target_chembl_id": arguments.get("target_chembl_id", "")}
+    
+    async def _execute_chembl_similarity_search(self, arguments: dict) -> dict:
+        """
+        Execute a ChEMBL structural similarity search.
+        """
+        try:
+            from src.schemas import ChemblSimilaritySearchParams
+            params = ChemblSimilaritySearchParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL similarity search for SMILES: {params.smiles[:20]}... (similarity: {params.similarity})")
+            results = await chembl_client.search_by_similarity(
+                smiles=params.smiles,
+                similarity=params.similarity,
+                limit=params.limit
+            )
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_similarity", results)
+            BioChatLogger.log_info(f"ChEMBL similarity search results saved to {file_path}")
+            
+            return results
+        except Exception as e:
+            BioChatLogger.log_error("ChEMBL similarity search execution error", e)
+            return {"error": str(e), "smiles": arguments.get("smiles", "")[:20] + "..."}
+    
+    async def _execute_chembl_substructure_search(self, arguments: dict) -> dict:
+        """
+        Execute a ChEMBL substructure search.
+        """
+        try:
+            from src.schemas import ChemblSubstructureSearchParams
+            params = ChemblSubstructureSearchParams(**arguments)
+            from src.APIHub import ChemblAPI
+            chembl_client = ChemblAPI()
+            
+            BioChatLogger.log_info(f"Executing ChEMBL substructure search for SMILES: {params.smiles[:20]}...")
+            results = await chembl_client.search_by_substructure(
+                smiles=params.smiles,
+                limit=params.limit
+            )
+            
+            # Save API response
+            file_path = self.save_api_response("chembl_substructure", results)
+            BioChatLogger.log_info(f"ChEMBL substructure search results saved to {file_path}")
+            
+            return results
+        except Exception as e:
+            BioChatLogger.log_error("ChEMBL substructure search execution error", e)
+            return {"error": str(e), "smiles": arguments.get("smiles", "")[:20] + "..."}
 
     async def _execute_target_analysis(self, arguments: Dict) -> Dict:
         """Execute comprehensive target analysis using Open Targets with better error handling"""

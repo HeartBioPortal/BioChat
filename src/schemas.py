@@ -266,6 +266,21 @@ class ChemblTargetInfoParams(BaseModel):
     """
     target_chembl_id: str = Field(..., description="ChEMBL target identifier")
 
+class ChemblSimilaritySearchParams(BaseModel):
+    """
+    Parameters for searching compounds by structural similarity in ChEMBL.
+    """
+    smiles: str = Field(..., description="SMILES notation of the query molecule")
+    similarity: float = Field(0.8, description="Similarity threshold (0-1)", ge=0.1, le=1.0)
+    limit: int = Field(10, description="Maximum number of results to return", ge=1, le=100)
+
+class ChemblSubstructureSearchParams(BaseModel):
+    """
+    Parameters for searching compounds containing a specific substructure in ChEMBL.
+    """
+    smiles: str = Field(..., description="SMILES notation of the query substructure")
+    limit: int = Field(10, description="Maximum number of results to return", ge=1, le=100)
+
 
 # Update the problematic tool definition in BIOCHAT_TOOLS
 BIOCHAT_TOOLS = [
@@ -343,6 +358,22 @@ BIOCHAT_TOOLS = [
             "name": "get_chembl_target_info",
             "description": "Retrieve target information from ChEMBL using a ChEMBL target ID.",
             "parameters": ChemblTargetInfoParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_chembl_similarity",
+            "description": "Search for compounds with structural similarity to a provided SMILES string. This is useful for finding chemically similar compounds to a molecule of interest.",
+            "parameters": ChemblSimilaritySearchParams.model_json_schema()
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_chembl_substructure",
+            "description": "Search for compounds containing a specific substructure defined by a SMILES string. This is useful for finding compounds with a particular chemical fragment or functional group.",
+            "parameters": ChemblSubstructureSearchParams.model_json_schema()
         }
     },
     {

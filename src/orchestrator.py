@@ -3,11 +3,11 @@ Module for orchestrating interactions between user queries and biological databa
 Handles query processing, API calls, and response synthesis.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import json
 from openai import AsyncOpenAI
 from src.utils.biochat_api_logging import BioChatLogger
-from src.utils.summarizer import ResponseSummarizer
+from src.utils.summarizer import ResponseSummarizer, StringInteractionExecutor
 from src.schemas import BIOCHAT_TOOLS
 from src.tool_executor import ToolExecutor
 import logging
@@ -36,6 +36,7 @@ class BioChatOrchestrator:
             )
             self.conversation_history = []
             self.summarizer = ResponseSummarizer()
+            self.string_executor = StringInteractionExecutor(self.client, self.gpt_model)
         except Exception as e:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
@@ -127,11 +128,15 @@ class BioChatOrchestrator:
                     summarized_response = self.summarize_api_response(tool_call.function.name, function_response)
                     
                     # Add to API responses if contains actual data
-                    if summarized_response and not (isinstance(summarized_response, dict) and 
-                        ("error" in summarized_response or 
-                        summarized_response.get("matches", []) == [] or 
-                        summarized_response.get("count", 0) == 0)):
-                        api_responses[tool_call.function.name] = summarized_response
+                    if summarized_response:
+                        # Skip empty responses or responses with empty matches
+                        if (isinstance(summarized_response, dict) and 
+                            ("error" in summarized_response or 
+                            summarized_response.get("matches", []) == [] or 
+                            summarized_response.get("count", 0) == 0)):
+                            BioChatLogger.log_info(f"Skipping empty result for {tool_call.function.name}")
+                        else:
+                            api_responses[tool_call.function.name] = summarized_response
                     
                     # Always add tool response to conversation history
                     self.conversation_history.append({
@@ -160,10 +165,28 @@ class BioChatOrchestrator:
             if not api_responses:
                 scientific_context += "No data found in any of the queried databases for any compounds.\n\n"
             else:
-                # Group results by compound
+                # Group results by compound - with better error handling
                 by_compound = {}
                 for tool_name, result in api_responses.items():
-                    compound = json.loads(initial_message.tool_calls[0].function.arguments).get("name", "unknown")
+                    try:
+                        if initial_message.tool_calls and len(initial_message.tool_calls) > 0:
+                            args = json.loads(initial_message.tool_calls[0].function.arguments)
+                            compound = args.get("name", "unknown")
+                            # Handle parameter name variations
+                            if not compound or compound == "unknown":
+                                for param in ["gene", "protein_id", "target_id", "molecule_chembl_id"]:
+                                    if param in args:
+                                        compound = args[param]
+                                        break
+                        else:
+                            compound = "unknown"
+                            
+                        if not isinstance(compound, str):
+                            compound = str(compound)  # Ensure it's a string
+                    except Exception as e:
+                        BioChatLogger.log_error("Error parsing compound name", e)
+                        compound = "unknown"
+                        
                     if compound not in by_compound:
                         by_compound[compound] = {}
                     by_compound[compound][tool_name] = result
@@ -328,3 +351,94 @@ For drug discovery applications:
     def clear_conversation_history(self) -> None:
         """Clear the conversation history"""
         self.conversation_history = []
+        
+    async def analyze_data(self, data: Union[Dict, List], analysis_prompt: str) -> Dict:
+        """
+        Perform a free-form analysis of arbitrary data using the StringInteractionExecutor.
+        
+        Args:
+            data: The structured data to analyze (dict or list)
+            analysis_prompt: Specific instructions for the analysis
+            
+        Returns:
+            Dict containing analysis results and metadata
+        """
+        try:
+            # Log analysis request
+            BioChatLogger.log_info(f"Performing custom data analysis with prompt: {analysis_prompt[:100]}...")
+            
+            # Execute the analysis via string interaction
+            analysis_result = await self.string_executor.guided_analysis(data, analysis_prompt)
+            
+            # Format and return results
+            return {
+                "success": True,
+                "analysis": analysis_result,
+                "metadata": {
+                    "prompt": analysis_prompt,
+                    "timestamp": datetime.now().isoformat(),
+                    "data_type": type(data).__name__,
+                    "data_size": len(json.dumps(data)) if data else 0
+                }
+            }
+            
+        except Exception as e:
+            BioChatLogger.log_error("Data analysis error", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "metadata": {
+                    "prompt": analysis_prompt,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+    
+    async def execute_string_query(self, query: str, context: Optional[str] = None) -> Dict:
+        """
+        Execute a direct string query against the OpenAI model without using tool calling.
+        Useful for queries that don't require specific API interactions.
+        
+        Args:
+            query: The user's query string
+            context: Optional additional context to provide to the model
+            
+        Returns:
+            Dict containing the response and metadata
+        """
+        try:
+            # Add to conversation history
+            self.conversation_history.append({"role": "user", "content": query})
+            
+            # Create system prompt based on context type
+            system_prompt = self._create_system_message()
+            
+            # Execute the query
+            response = await self.string_executor.execute_query(
+                query=query,
+                system_prompt=system_prompt,
+                context=context
+            )
+            
+            # Add response to conversation history
+            self.conversation_history.append({"role": "assistant", "content": response})
+            
+            return {
+                "success": True,
+                "response": response,
+                "metadata": {
+                    "query": query,
+                    "has_context": context is not None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            BioChatLogger.log_error("String query execution error", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "metadata": {
+                    "query": query,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }

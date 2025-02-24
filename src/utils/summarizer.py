@@ -1,5 +1,6 @@
 """
-Module for summarizing API responses from various biological databases.
+Module for summarizing API responses from various biological databases and handling
+string-based interactions with OpenAI LLMs.
 Uses strategy pattern to handle different summarization approaches for each API.
 """
 from abc import ABC, abstractmethod
@@ -7,6 +8,8 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
 from dataclasses import dataclass
+import logging
+from openai import AsyncOpenAI
 
 class APISummarizer(ABC):
     """Abstract base class for API response summarizers."""
@@ -137,13 +140,65 @@ class IntActSummarizer(APISummarizer):
         summary["summary_timestamp"] = self._format_timestamp()
         return summary
 
+class ChemblSummarizer(APISummarizer):
+    """Summarizer for ChEMBL API responses."""
+    
+    def summarize(self, response: Dict) -> Dict:
+        """Summarize ChEMBL data focusing on key compound properties."""
+        if "error" in response:
+            return {"error": response.get("error", "Unknown error")}
+            
+        if "molecules" not in response and "molecule_hierarchy" not in response:
+            # Likely a search result
+            compounds = response.get("molecules", [])
+            if not compounds:
+                compounds = [response] if "molecule_chembl_id" in response else []
+                
+            summary = {
+                "total_compounds": len(compounds),
+                "compounds": []
+            }
+            
+            # Add compound data
+            for compound in compounds[:5]:  # Limit to top 5
+                summary["compounds"].append({
+                    "chembl_id": compound.get("molecule_chembl_id"),
+                    "pref_name": compound.get("pref_name"),
+                    "molecule_type": compound.get("molecule_type"),
+                    "max_phase": compound.get("max_phase"),
+                    "activity_count": compound.get("activity_count")
+                })
+                
+            return summary
+            
+        # Single compound detail
+        compound = response
+        summary = {
+            "chembl_id": compound.get("molecule_chembl_id"),
+            "name": compound.get("pref_name"),
+            "structure": {
+                "smiles": compound.get("molecule_structures", {}).get("canonical_smiles"),
+                "inchi": compound.get("molecule_structures", {}).get("standard_inchi")
+            },
+            "properties": {
+                "molecular_weight": compound.get("molecule_properties", {}).get("full_mwt"),
+                "alogp": compound.get("molecule_properties", {}).get("alogp"),
+                "psa": compound.get("molecule_properties", {}).get("psa"),
+                "hba": compound.get("molecule_properties", {}).get("hba"),
+                "hbd": compound.get("molecule_properties", {}).get("hbd")
+            }
+        }
+        
+        return summary
+
 class APISummarizerFactory:
     """Factory class for creating appropriate summarizer instances."""
     
     _summarizers = {
         "opentargets": OpenTargetsSummarizer,
         "biogrid": BioGridSummarizer,
-        "intact": IntActSummarizer
+        "intact": IntActSummarizer,
+        "chembl": ChemblSummarizer
     }
     
     @classmethod
@@ -191,3 +246,91 @@ class ResponseSummarizer:
             
     def _format_timestamp(self) -> str:
         return datetime.now().isoformat()
+
+class StringInteractionExecutor:
+    """
+    Handles string-based interactions with OpenAI's LLM for custom functionality.
+    This complements the OpenAI function calling interface.
+    """
+    
+    def __init__(self, openai_client: AsyncOpenAI, model: str = "gpt-4o"):
+        """
+        Initialize the string interaction executor with OpenAI credentials.
+        
+        Args:
+            openai_client: AsyncOpenAI client instance
+            model: The OpenAI model to use for string interactions
+        """
+        self.client = openai_client
+        self.model = model
+        self.logger = logging.getLogger(__name__)
+    
+    async def execute_query(self, query: str, system_prompt: str, 
+                           context: Optional[str] = None) -> str:
+        """
+        Execute a string-based query against the OpenAI model.
+        
+        Args:
+            query: The user query to process
+            system_prompt: The system prompt to guide the model behavior
+            context: Optional additional context for the model
+            
+        Returns:
+            The model's response as a string
+        """
+        try:
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            if context:
+                messages.append({"role": "system", "content": f"Context:\n{context}"})
+                
+            messages.append({"role": "user", "content": query})
+            
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages
+            )
+            
+            return completion.choices[0].message.content
+            
+        except Exception as e:
+            self.logger.error(f"String interaction execution error: {str(e)}")
+            return f"Error processing query: {str(e)}"
+    
+    async def guided_analysis(self, data: Dict, analysis_prompt: str) -> str:
+        """
+        Perform a guided analysis of structured data using the LLM.
+        
+        Args:
+            data: Structured data to analyze
+            analysis_prompt: The specific instructions for analysis
+            
+        Returns:
+            The model's analysis as a string
+        """
+        try:
+            # Format data as a JSON string
+            data_str = json.dumps(data, indent=2)
+            
+            system_prompt = """
+            You are a specialized scientific analysis system. Your task is to analyze 
+            the provided structured data and respond with a detailed analysis.
+            Focus on identifying patterns, drawing conclusions, and extracting insights.
+            Maintain scientific precision and clarity throughout your analysis.
+            """
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Analysis instructions: {analysis_prompt}\n\nData to analyze:\n{data_str}"}
+            ]
+            
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages
+            )
+            
+            return completion.choices[0].message.content
+            
+        except Exception as e:
+            self.logger.error(f"Guided analysis error: {str(e)}")
+            return f"Error performing analysis: {str(e)}"
