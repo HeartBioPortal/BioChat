@@ -255,50 +255,70 @@ class NCBIEutils(BioDatabaseAPI):
                 
             BioChatLogger.log_info(f"Extracting abstracts for {len(id_list)} PMIDs")
             
-            fetch_params = self._build_base_params()
-            fetch_params.update({
-                "db": "pubmed",
-                "id": ",".join(id_list),
-                "rettype": "abstract",
-                "retmode": "xml"
-            })
+            # Process in smaller batches to avoid large responses
+            batch_size = 5
+            all_abstracts = {}
             
-            # Use _make_request instead of _make_raw_request
-            response = await self._make_request("efetch.fcgi", params=fetch_params)
-            
-            # Handle different response formats
-            xml_content = ""
-            if isinstance(response, dict):
-                if "result" in response:
-                    xml_content = response["result"]
-                elif "content" in response:
-                    xml_content = response["content"]
-                else:
-                    # Try to convert the entire response to string
-                    xml_content = json.dumps(response)
-            else:
-                xml_content = str(response)
-            
-            # Process the XML response
-            try:
-                root = ET.fromstring(xml_content)
+            # Process IDs in batches
+            for i in range(0, len(id_list), batch_size):
+                batch_ids = id_list[i:i + batch_size]
+                BioChatLogger.log_info(f"Processing batch of {len(batch_ids)} PMIDs")
                 
-                abstracts = {}
-                for article in root.findall(".//PubmedArticle"):
-                    pmid_elem = article.find(".//PMID")
-                    if pmid_elem is not None and pmid_elem.text:
-                        pmid = pmid_elem.text
-                        abstract_element = article.find(".//Abstract/AbstractText")
-                        if abstract_element is not None:
-                            abstracts[pmid] = abstract_element.text
-                        else:
-                            abstracts[pmid] = None
+                fetch_params = self._build_base_params()
+                fetch_params.update({
+                    "db": "pubmed",
+                    "id": ",".join(batch_ids),
+                    "rettype": "abstract",
+                    "retmode": "xml"
+                })
+                
+                try:
+                    # Use direct URL construction for efetch to get raw XML
+                    url = f"{self.base_url}/efetch.fcgi"
+                    
+                    # Initialize session if needed
+                    if not self.session or self.session.closed:
+                        await self._init_session()
+                    
+                    # Directly get the text response rather than JSON
+                    async with self.session.get(url, params=fetch_params) as response:
+                        if response.status != 200:
+                            BioChatLogger.log_error(f"NCBI API error: {response.status}", 
+                                                  Exception(f"HTTP {response.status}"))
+                            continue
+                            
+                        # Get text directly instead of trying to parse JSON
+                        xml_content = await response.text()
                         
-                BioChatLogger.log_info(f"Extracted {len(abstracts)} abstracts successfully")
-                return abstracts
-            except ET.ParseError as e:
-                BioChatLogger.log_error(f"XML parsing error: {str(e)}", e)
-                return {}
+                        # Process the XML
+                        try:
+                            root = ET.fromstring(xml_content)
+                            
+                            batch_abstracts = {}
+                            for article in root.findall(".//PubmedArticle"):
+                                pmid_elem = article.find(".//PMID")
+                                if pmid_elem is not None and pmid_elem.text:
+                                    pmid = pmid_elem.text
+                                    abstract_element = article.find(".//Abstract/AbstractText")
+                                    if abstract_element is not None:
+                                        batch_abstracts[pmid] = abstract_element.text
+                                    else:
+                                        batch_abstracts[pmid] = None
+                            
+                            # Add batch results to overall results
+                            all_abstracts.update(batch_abstracts)
+                            BioChatLogger.log_info(f"Extracted {len(batch_abstracts)} abstracts from batch")
+                            
+                        except ET.ParseError as e:
+                            BioChatLogger.log_error(f"XML parsing error: {str(e)}", e)
+                            continue
+                            
+                except Exception as e:
+                    BioChatLogger.log_error(f"Error processing batch: {str(e)}", e)
+                    continue
+            
+            BioChatLogger.log_info(f"Total abstracts extracted: {len(all_abstracts)}")
+            return all_abstracts
                 
         except Exception as e:
             BioChatLogger.log_error("Error in extract_abstracts", e)
