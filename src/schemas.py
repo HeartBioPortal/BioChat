@@ -1,5 +1,6 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from enum import Enum, IntEnum
 
 class LiteratureSearchParams(BaseModel):
     """Parameters for literature search queries"""
@@ -280,6 +281,91 @@ class ChemblSubstructureSearchParams(BaseModel):
     """
     smiles: str = Field(..., description="SMILES notation of the query substructure")
     limit: int = Field(10, description="Maximum number of results to return", ge=1, le=100)
+
+
+class EndpointPriority(IntEnum):
+    """Priority levels for API endpoints"""
+    CRITICAL = 1    # Must-use endpoints (PubMed, UniProt, etc.)
+    HIGH = 2        # Very reliable and informative (Ensembl, Reactome)
+    MEDIUM = 3      # Useful but not essential (ChEMBL, Open Targets)
+    LOW = 4         # May have limited data or reliability (PharmGKB)
+    OPTIONAL = 5    # Only use if specifically relevant
+
+
+class QueryCategory(str, Enum):
+    """Categories of biological queries to help route to appropriate endpoints"""
+    GENE_FUNCTION = "gene_function"              # General gene/protein function
+    PROTEIN_STRUCTURE = "protein_structure"      # 3D structure, domains, etc.
+    PATHWAY_ANALYSIS = "pathway_analysis"        # Biological pathways
+    DISEASE_ASSOCIATION = "disease_association"  # Gene-disease connections
+    DRUG_TARGET = "drug_target"                  # Drug-target interactions
+    COMPOUND_INFO = "compound_info"              # Chemical compound data
+    GENETIC_VARIANT = "genetic_variant"          # SNPs, mutations, etc.
+    MOLECULAR_INTERACTION = "molecular_interaction"  # PPI, protein-DNA, etc.
+    LITERATURE = "literature"                    # Literature-based data
+    PHARMACOGENOMICS = "pharmacogenomics"        # Gene-drug interactions
+
+
+# Mapping query categories to appropriate endpoints with priority
+ENDPOINT_PRIORITY_MAP = {
+    QueryCategory.GENE_FUNCTION: [
+        ("search_literature", EndpointPriority.CRITICAL),
+        ("get_protein_info", EndpointPriority.CRITICAL),
+        ("analyze_pathways", EndpointPriority.HIGH),
+        ("get_string_interactions", EndpointPriority.HIGH),
+        ("get_intact_interactions", EndpointPriority.MEDIUM),
+        ("get_biogrid_interactions", EndpointPriority.MEDIUM),
+    ],
+    QueryCategory.PROTEIN_STRUCTURE: [
+        ("get_protein_info", EndpointPriority.CRITICAL),
+        ("search_literature", EndpointPriority.HIGH),
+    ],
+    QueryCategory.PATHWAY_ANALYSIS: [
+        ("analyze_pathways", EndpointPriority.CRITICAL),
+        ("analyze_target", EndpointPriority.HIGH),
+        ("search_pathway", EndpointPriority.MEDIUM),
+        ("get_string_interactions", EndpointPriority.MEDIUM),
+    ],
+    QueryCategory.DISEASE_ASSOCIATION: [
+        ("search_literature", EndpointPriority.CRITICAL),
+        ("analyze_disease", EndpointPriority.CRITICAL),
+        ("search_gwas", EndpointPriority.HIGH),
+        ("analyze_target", EndpointPriority.HIGH),
+    ],
+    QueryCategory.DRUG_TARGET: [
+        ("analyze_target", EndpointPriority.CRITICAL),
+        ("search_chembl", EndpointPriority.HIGH),
+        ("get_chembl_bioactivities", EndpointPriority.HIGH),
+        ("get_chembl_target_info", EndpointPriority.HIGH),
+        ("search_chemical", EndpointPriority.LOW),
+    ],
+    QueryCategory.COMPOUND_INFO: [
+        ("search_chembl", EndpointPriority.CRITICAL),
+        ("get_chembl_compound_details", EndpointPriority.CRITICAL),
+        ("search_chembl_similarity", EndpointPriority.HIGH),
+        ("search_chembl_substructure", EndpointPriority.HIGH),
+        ("search_chemical", EndpointPriority.LOW),
+    ],
+    QueryCategory.GENETIC_VARIANT: [
+        ("search_variants", EndpointPriority.CRITICAL),
+        ("search_gwas", EndpointPriority.HIGH),
+        ("get_variant_annotation", EndpointPriority.LOW),
+    ],
+    QueryCategory.MOLECULAR_INTERACTION: [
+        ("get_string_interactions", EndpointPriority.CRITICAL),
+        ("get_biogrid_interactions", EndpointPriority.HIGH),
+        ("get_intact_interactions", EndpointPriority.HIGH),
+        ("get_biogrid_chemical_interactions", EndpointPriority.MEDIUM),
+    ],
+    QueryCategory.LITERATURE: [
+        ("search_literature", EndpointPriority.CRITICAL),
+    ],
+    QueryCategory.PHARMACOGENOMICS: [
+        ("search_clinical_annotation", EndpointPriority.MEDIUM),
+        ("get_pharmgkb_annotations", EndpointPriority.LOW),
+        ("search_drug_labels", EndpointPriority.LOW),
+    ],
+}
 
 
 # Update the problematic tool definition in BIOCHAT_TOOLS

@@ -3,12 +3,12 @@ Module for orchestrating interactions between user queries and biological databa
 Handles query processing, API calls, and response synthesis.
 """
 
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Set, Tuple
 import json
 from openai import AsyncOpenAI
 from src.utils.biochat_api_logging import BioChatLogger
 from src.utils.summarizer import ResponseSummarizer, StringInteractionExecutor
-from src.schemas import BIOCHAT_TOOLS
+from src.schemas import BIOCHAT_TOOLS, EndpointPriority, QueryCategory, ENDPOINT_PRIORITY_MAP
 from src.tool_executor import ToolExecutor
 import logging
 import os
@@ -78,20 +78,130 @@ class BioChatOrchestrator:
         
         return str(response)  # Return original response for unmapped tools
 
+    async def determine_query_categories(self, query: str) -> List[QueryCategory]:
+        """
+        Use the LLM to determine the categories of the query to prioritize endpoints.
+        
+        Args:
+            query: The user's query string
+            
+        Returns:
+            List of QueryCategory enum values
+        """
+        try:
+            system_prompt = """
+            Your task is to categorize a biological or medical research query into one or more categories.
+            Analyze the query and return ONLY the category codes that apply, separated by commas.
+            Available categories:
+            
+            - GENE_FUNCTION: For questions about general gene/protein function
+            - PROTEIN_STRUCTURE: For questions about 3D structure, domains, etc.
+            - PATHWAY_ANALYSIS: For questions about biological pathways
+            - DISEASE_ASSOCIATION: For questions relating genes/proteins to diseases
+            - DRUG_TARGET: For questions about drug-target interactions
+            - COMPOUND_INFO: For questions about chemical compounds
+            - GENETIC_VARIANT: For questions about SNPs, mutations, etc.
+            - MOLECULAR_INTERACTION: For questions about protein-protein interactions
+            - LITERATURE: For questions requiring scientific literature
+            - PHARMACOGENOMICS: For questions about gene-drug interactions
+            
+            Return ONLY the category codes, no other text. Multiple categories should be separated by commas.
+            """
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ]
+            
+            completion = await self.client.chat.completions.create(
+                model=self.gpt_model,
+                messages=messages
+            )
+            
+            response = completion.choices[0].message.content.strip()
+            categories = [cat.strip() for cat in response.split(",")]
+            
+            # Convert string categories to QueryCategory enum values
+            result = []
+            valid_categories = set(item.value for item in QueryCategory)
+            
+            for category in categories:
+                if category in valid_categories:
+                    result.append(QueryCategory(category))
+            
+            # If no valid categories were found, default to LITERATURE
+            if not result:
+                BioChatLogger.log_info("No valid categories determined, defaulting to LITERATURE")
+                result = [QueryCategory.LITERATURE]
+                
+            return result
+            
+        except Exception as e:
+            BioChatLogger.log_error(f"Error determining query categories: {str(e)}")
+            # Default to LITERATURE on error
+            return [QueryCategory.LITERATURE]
+    
+    def get_prioritized_tools(self, categories: List[QueryCategory]) -> List[Dict]:
+        """
+        Get a prioritized list of tools based on the query categories.
+        
+        Args:
+            categories: List of QueryCategory enum values
+            
+        Returns:
+            List of tool definitions ordered by priority
+        """
+        # Create a set of (endpoint_name, priority) tuples
+        endpoints_with_priority: Set[Tuple[str, int]] = set()
+        
+        # Add all endpoints from all categories with their priorities
+        for category in categories:
+            if category in ENDPOINT_PRIORITY_MAP:
+                for endpoint, priority in ENDPOINT_PRIORITY_MAP[category]:
+                    endpoints_with_priority.add((endpoint, priority.value))
+        
+        # Sort endpoints by priority (lower value = higher priority)
+        sorted_endpoints = sorted(endpoints_with_priority, key=lambda x: x[1])
+        
+        # Get the endpoint names in priority order
+        prioritized_endpoint_names = [endpoint for endpoint, _ in sorted_endpoints]
+        
+        # Find the tool definitions for these endpoints
+        endpoint_to_tool = {tool["function"]["name"]: tool for tool in BIOCHAT_TOOLS}
+        prioritized_tools = [endpoint_to_tool[name] for name in prioritized_endpoint_names 
+                           if name in endpoint_to_tool]
+        
+        # Add any tools not covered by the categories as low priority
+        all_endpoint_names = set(prioritized_endpoint_names)
+        for tool in BIOCHAT_TOOLS:
+            if tool["function"]["name"] not in all_endpoint_names:
+                prioritized_tools.append(tool)
+        
+        BioChatLogger.log_info(f"Prioritized {len(prioritized_tools)} tools based on categories: {[c.value for c in categories]}")
+        return prioritized_tools
+    
     async def process_query(self, user_query: str) -> str:
-        """Process a user query with comprehensive database searches for multiple compounds."""
+        """Process a user query with prioritized database searches based on query type."""
         
         self.conversation_history.append({"role": "user", "content": user_query})
+        
+        # First, determine the query categories to prioritize endpoints
+        categories = await self.determine_query_categories(user_query)
+        BioChatLogger.log_info(f"Query categorized as: {[c.value for c in categories]}")
+        
+        # Get tools prioritized for these categories
+        prioritized_tools = self.get_prioritized_tools(categories)
 
         messages = [
-            {"role": "system", "content": self._create_system_message()}, *self.conversation_history
+            {"role": "system", "content": self._create_system_message()}, 
+            *self.conversation_history
         ]
 
         # Get all tool calls at once
         initial_completion = await self.client.chat.completions.create(
             model=self.gpt_model,
             messages=messages,
-            tools=BIOCHAT_TOOLS,
+            tools=prioritized_tools,
             tool_choice="auto"
         )
 
@@ -238,10 +348,25 @@ class BioChatOrchestrator:
 
 
     async def process_single_gene_query(self, query: str) -> str:
-        """Process a query about a single gene"""
-        # Similar to process_query but with stricter token limits
+        """
+        Process a query about a single gene with optimized endpoint selection.
+        Prioritizes gene function and protein info endpoints.
+        """
         try:
             self.conversation_history.append({"role": "user", "content": query})
+            
+            # For gene queries, we can directly set the categories instead of determining them
+            gene_categories = [
+                QueryCategory.GENE_FUNCTION,
+                QueryCategory.PROTEIN_STRUCTURE,
+                QueryCategory.PATHWAY_ANALYSIS,
+                QueryCategory.MOLECULAR_INTERACTION
+            ]
+            
+            # Get prioritized tools for gene queries
+            prioritized_tools = self.get_prioritized_tools(gene_categories)
+            
+            BioChatLogger.log_info(f"Gene query: Using fixed categories: {[c.value for c in gene_categories]}")
             
             messages = [
                 {"role": "system", "content": self._create_system_message()},
@@ -251,9 +376,8 @@ class BioChatOrchestrator:
             completion = await self.client.chat.completions.create(
                 model=self.gpt_model,
                 messages=messages,
-                tools=BIOCHAT_TOOLS,
-                tool_choice="auto",
-                # max_completion_tokens=4000  
+                tools=prioritized_tools,
+                tool_choice="auto"
             )
             
             return completion.choices[0].message.content
@@ -272,10 +396,10 @@ You are BioChat, a specialized AI assistant for biological and medical research,
 ## Core Functions
 
 1. Database Integration
-- Systematically query ALL available biological databases and APIs for each request
+- INTELLIGENTLY select the most appropriate databases for each query - do not use all databases indiscriminately
+- Categorize queries to determine the best data sources (see Database Selection Guide below)
 - Cross-reference information across multiple databases to ensure completeness
-- Track and log all API calls with timestamps and response metadata
-- Prioritize most recent data sources when available
+- Prioritize high-quality, reliable data sources
 
 2. Data Analysis & Synthesis
 - Process raw API responses in full detail, including metadata and supplementary information
@@ -306,26 +430,64 @@ c) Clinical/Research Applications
 - Safety considerations
 - Research opportunities
 
-4. Citation & Documentation
-- Include full database citations with:
-  * Database name and version
-  * Query parameters used
-  * Timestamp of data retrieval
-  * DOI/accession numbers
-  * API endpoint documentation
-  * Data update frequencies
-- Generate structured bibliography in multiple formats (APA, Vancouver, etc.)
-- Provide API response logs for validation
+## Database Selection Guide
 
-5. Quality Control
-- Validate data consistency across sources
-- Flag conflicting information
-- Highlight data quality metrics
-- Note experimental conditions and limitations
-- Indicate confidence levels in conclusions
+When processing a query, first determine which category it falls into:
 
-6. Additional Requirements
-- Return complete API response data, including supplementary fields
+1. Gene Function: Questions about general gene/protein function
+   - CRITICAL: PubMed literature search, UniProt protein info
+   - HIGH: Reactome pathways, STRING interactions
+   - MEDIUM: IntAct/BioGRID interactions
+
+2. Protein Structure: Questions about 3D structure, domains, etc.
+   - CRITICAL: UniProt protein info
+   - HIGH: PubMed literature
+
+3. Pathway Analysis: Questions about biological pathways
+   - CRITICAL: Reactome pathways
+   - HIGH: Open Targets, STRING interactions
+
+4. Disease Association: Questions relating genes/proteins to diseases
+   - CRITICAL: PubMed literature, Open Targets disease analysis
+   - HIGH: GWAS Catalog, Open Targets target analysis
+
+5. Drug Target: Questions about drug-target interactions
+   - CRITICAL: Open Targets target analysis
+   - HIGH: ChEMBL search/bioactivities/target info
+   - LOW: PharmGKB chemical search (unreliable data availability)
+
+6. Compound Info: Questions about chemical compounds
+   - CRITICAL: ChEMBL search, ChEMBL compound details
+   - HIGH: ChEMBL similarity/substructure searches
+   - LOW: PharmGKB chemical search (unreliable data availability)
+
+7. Genetic Variant: Questions about SNPs, mutations, etc.
+   - CRITICAL: Ensembl variants
+   - HIGH: GWAS Catalog
+   - LOW: PharmGKB variant annotation
+
+8. Molecular Interaction: Questions about protein-protein interactions
+   - CRITICAL: STRING interactions
+   - HIGH: BioGRID interactions, IntAct interactions
+
+9. Literature: Questions requiring scientific literature
+   - CRITICAL: PubMed literature search
+
+10. Pharmacogenomics: Questions about gene-drug interactions
+    - MEDIUM: PharmGKB clinical annotations (limited reliability)
+    - LOW: PharmGKB annotations, drug labels (often unavailable)
+
+## API Reliability Guide
+
+Some APIs have known reliability issues:
+- PharmGKB APIs (search_chemical, get_pharmgkb_annotations, etc.) often return no data - use as supplementary only
+- Always include PubMed literature searches for critical information validation
+- ChEMBL is highly reliable for drug and compound information
+- UniProt is authoritative for protein information
+- Reactome is preferred for pathway information
+
+## Additional Requirements
+- Match query type to appropriate data sources - avoid using unreliable sources for critical information
 - Include negative results and null findings
 - Maintain version control of information
 - Track data provenance
