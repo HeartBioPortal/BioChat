@@ -497,6 +497,42 @@ class QueryAnalyzer:
                     - Cellular and physiological outcomes
                     - Cross-talk with other pathways
                     """
+                elif entity_type == "variant":
+                    entity_instructions += """
+                    For genetic variants, emphasize:
+                    - Location and nature of the variant
+                    - Functional consequences of the variant
+                    - Associated phenotypes and diseases
+                    - Population frequencies and risk assessments 
+                    - Molecular mechanisms of pathogenicity
+                    """
+                elif entity_type == "phenotype":
+                    entity_instructions += """
+                    For phenotypes, emphasize:
+                    - Clinical and physiological manifestations
+                    - Underlying molecular mechanisms
+                    - Genetic and environmental influences
+                    - Diagnostic criteria and biomarkers
+                    - Relationship to disease progression
+                    """
+                elif entity_type == "cell_type" or entity_type == "tissue":
+                    entity_instructions += """
+                    For cells and tissues, emphasize:
+                    - Structure and functional characteristics
+                    - Cell-cell interactions and signaling
+                    - Role in physiological processes
+                    - Pathological changes in disease states
+                    - Tissue-specific gene expression patterns
+                    """
+                else:
+                    # Generic instructions for any other entity type
+                    entity_instructions += f"""
+                    For {entity_type}, emphasize:
+                    - Definition and key characteristics
+                    - Biological context and importance
+                    - Related entities and interactions
+                    - Research significance and applications
+                    """
             
             # Relationship-specific instructions
             relationship_instructions = {
