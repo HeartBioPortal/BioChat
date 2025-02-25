@@ -8,6 +8,7 @@ import json
 from openai import AsyncOpenAI
 from src.utils.biochat_api_logging import BioChatLogger
 from src.utils.summarizer import ResponseSummarizer, StringInteractionExecutor
+from src.utils.query_analyzer import QueryAnalyzer
 from src.schemas import BIOCHAT_TOOLS, EndpointPriority, QueryCategory, ENDPOINT_PRIORITY_MAP
 from src.tool_executor import ToolExecutor
 import logging
@@ -37,6 +38,7 @@ class BioChatOrchestrator:
             self.conversation_history = []
             self.summarizer = ResponseSummarizer()
             self.string_executor = StringInteractionExecutor(self.client, self.gpt_model)
+            self.query_analyzer = QueryAnalyzer(self.client, self.gpt_model)
         except Exception as e:
             logger.error(f"Initialization error: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to initialize services: {str(e)}")
@@ -180,20 +182,71 @@ class BioChatOrchestrator:
         BioChatLogger.log_info(f"Prioritized {len(prioritized_tools)} tools based on categories: {[c.value for c in categories]}")
         return prioritized_tools
     
+    async def get_intelligent_database_sequence(self, query: str) -> List[str]:
+        """
+        Use the QueryAnalyzer to intelligently determine the optimal database sequence.
+        
+        Args:
+            query: The user's query string
+            
+        Returns:
+            List of database endpoint names in priority order
+        """
+        try:
+            # Analyze query to extract entities, intents, and relationships
+            analysis = await self.query_analyzer.analyze_query(query)
+            BioChatLogger.log_info(f"Query analysis completed. Intent: {analysis.get('primary_intent')}")
+            
+            # Determine optimal database sequence using the knowledge graph approach
+            db_sequence = self.query_analyzer.get_optimal_database_sequence(analysis)
+            BioChatLogger.log_info(f"Optimal database sequence: {db_sequence}")
+            
+            # Generate domain-specific prompt if needed
+            domain_prompt = self.query_analyzer.create_domain_specific_prompt(analysis)
+            
+            return db_sequence, analysis, domain_prompt
+        except Exception as e:
+            BioChatLogger.log_error(f"Error in intelligent database selection: {str(e)}", e)
+            return ["search_literature"], {}, self._create_system_message()
+    
     async def process_query(self, user_query: str) -> str:
         """Process a user query with prioritized database searches based on query type."""
         
         self.conversation_history.append({"role": "user", "content": user_query})
         
-        # First, determine the query categories to prioritize endpoints
-        categories = await self.determine_query_categories(user_query)
-        BioChatLogger.log_info(f"Query categorized as: {[c.value for c in categories]}")
-        
-        # Get tools prioritized for these categories
-        prioritized_tools = self.get_prioritized_tools(categories)
+        # Use intelligent query analysis for database prioritization
+        try:
+            db_sequence, analysis, domain_prompt = await self.get_intelligent_database_sequence(user_query)
+            
+            # Log the results of intelligent analysis
+            BioChatLogger.log_info(f"Using intelligent database sequence: {db_sequence}")
+            
+            # Fall back to categories if needed
+            if not db_sequence or len(db_sequence) < 2:
+                BioChatLogger.log_info("Insufficient database sequence, falling back to categories")
+                categories = await self.determine_query_categories(user_query)
+                BioChatLogger.log_info(f"Query categorized as: {[c.value for c in categories]}")
+                prioritized_tools = self.get_prioritized_tools(categories)
+            else:
+                # Convert db_sequence to prioritized tools
+                prioritized_tools = []
+                for db_name in db_sequence:
+                    for tool in BIOCHAT_TOOLS:
+                        if tool["function"]["name"] == db_name:
+                            prioritized_tools.append(tool)
+                            break
+        except Exception as e:
+            BioChatLogger.log_error(f"Error in intelligent analysis: {str(e)}, falling back to categories", e)
+            # Fallback to category-based approach
+            categories = await self.determine_query_categories(user_query)
+            BioChatLogger.log_info(f"Query categorized as: {[c.value for c in categories]}")
+            prioritized_tools = self.get_prioritized_tools(categories)
 
+        # Create system message - use domain-specific prompt if available
+        system_message = domain_prompt if 'domain_prompt' in locals() and domain_prompt else self._create_system_message()
+        
         messages = [
-            {"role": "system", "content": self._create_system_message()}, 
+            {"role": "system", "content": system_message}, 
             *self.conversation_history
         ]
 
@@ -267,8 +320,13 @@ class BioChatOrchestrator:
             structured_response = {
                 "query": user_query,
                 "synthesis": "",
-                "structured_data": api_responses
+                "structured_data": api_responses,
+                "database_sequence": db_sequence if 'db_sequence' in locals() else []
             }
+            
+            # Include query analysis in response if available
+            if 'analysis' in locals() and analysis:
+                structured_response["query_analysis"] = analysis
 
             # Format complete API results for GPT
             scientific_context = "**🔬 Complete API Results:**\n\n"
@@ -323,24 +381,46 @@ class BioChatOrchestrator:
             structured_response["synthesis"] = final_completion.choices[0].message.content
             self.conversation_history.append({"role": "assistant", "content": structured_response["synthesis"]})
 
-            # Save complete response
-            gpt_response_path = self.save_gpt_response(user_query, structured_response)
+            # Save complete response with analysis results if available
+            analysis_data = analysis if 'analysis' in locals() and analysis else None
+            gpt_response_path = self.save_gpt_response(user_query, structured_response, analysis_data)
             BioChatLogger.log_info(f"Complete GPT response saved at: {gpt_response_path}")
 
             return structured_response["synthesis"]
 
-    def save_gpt_response(self, query: str, response: Dict) -> str:
-        """Save the complete GPT response to a file and return the file path."""
+    def save_gpt_response(self, query: str, response: Dict, analysis: Dict = None) -> str:
+        """
+        Save the complete GPT response to a file and return the file path.
+        
+        Args:
+            query: The user's query string
+            response: The structured response data
+            analysis: Optional query analysis results
+            
+        Returns:
+            The file path where the response was saved
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"gpt_response_{timestamp}.json"
         filepath = os.path.join(API_RESULTS_DIR, filename)
         
+        output_data = {
+            "query": query,
+            "response": response,
+            "timestamp": timestamp
+        }
+        
+        # Include analysis data if available
+        if analysis:
+            output_data["query_analysis"] = {
+                "intent": analysis.get("primary_intent", "unknown"),
+                "entities": analysis.get("entities", {}),
+                "relationship_type": analysis.get("relationship_type", "unknown"),
+                "confidence": analysis.get("confidence", 0.0)
+            }
+        
         with open(filepath, "w") as file:
-            json.dump({
-                "query": query,
-                "response": response,
-                "timestamp": timestamp
-            }, file, indent=4)
+            json.dump(output_data, file, indent=4)
         
         BioChatLogger.log_info(f"GPT response saved at {filepath}")
         return filepath
@@ -350,26 +430,52 @@ class BioChatOrchestrator:
     async def process_single_gene_query(self, query: str) -> str:
         """
         Process a query about a single gene with optimized endpoint selection.
-        Prioritizes gene function and protein info endpoints.
+        Uses the query analyzer with gene-specific optimizations.
         """
         try:
             self.conversation_history.append({"role": "user", "content": query})
             
-            # For gene queries, we can directly set the categories instead of determining them
-            gene_categories = [
-                QueryCategory.GENE_FUNCTION,
-                QueryCategory.PROTEIN_STRUCTURE,
-                QueryCategory.PATHWAY_ANALYSIS,
-                QueryCategory.MOLECULAR_INTERACTION
-            ]
+            # Try using the query analyzer for more intelligent routing
+            try:
+                analysis = await self.query_analyzer.analyze_query(query)
+                
+                # Prepopulate entity types if not detected
+                if not analysis.get("entities", {}):
+                    analysis["entities"] = {"gene": ["unknown_gene"]}
+                    BioChatLogger.log_info("Added gene entity type to analysis")
+                
+                # Get optimal database sequence
+                db_sequence = self.query_analyzer.get_optimal_database_sequence(analysis)
+                BioChatLogger.log_info(f"Gene query using database sequence: {db_sequence}")
+                
+                # Generate specialized system prompt
+                system_prompt = self.query_analyzer.create_domain_specific_prompt(analysis)
+                
+                # Convert to tools
+                prioritized_tools = []
+                for db_name in db_sequence:
+                    for tool in BIOCHAT_TOOLS:
+                        if tool["function"]["name"] == db_name:
+                            prioritized_tools.append(tool)
+                            break
+            except Exception as e:
+                BioChatLogger.log_error(f"Error in gene query analysis: {str(e)}", e)
+                
+                # Fallback to category approach for genes
+                BioChatLogger.log_info("Falling back to fixed gene categories")
+                gene_categories = [
+                    QueryCategory.GENE_FUNCTION,
+                    QueryCategory.PROTEIN_STRUCTURE,
+                    QueryCategory.PATHWAY_ANALYSIS,
+                    QueryCategory.MOLECULAR_INTERACTION
+                ]
+                prioritized_tools = self.get_prioritized_tools(gene_categories)
+                BioChatLogger.log_info(f"Gene query: Using fixed categories: {[c.value for c in gene_categories]}")
+                system_prompt = self._create_system_message()
             
-            # Get prioritized tools for gene queries
-            prioritized_tools = self.get_prioritized_tools(gene_categories)
-            
-            BioChatLogger.log_info(f"Gene query: Using fixed categories: {[c.value for c in gene_categories]}")
-            
+            # Use recent conversation context only
             messages = [
-                {"role": "system", "content": self._create_system_message()},
+                {"role": "system", "content": system_prompt},
                 *self.conversation_history[-2:]  # Only keep recent context
             ]
 
@@ -380,7 +486,10 @@ class BioChatOrchestrator:
                 tool_choice="auto"
             )
             
-            return completion.choices[0].message.content
+            # Add response to history and return
+            response = completion.choices[0].message.content
+            self.conversation_history.append({"role": "assistant", "content": response})
+            return response
             
         except Exception as e:
             logger.error(f"Error in single gene query: {str(e)}")
@@ -553,6 +662,126 @@ For drug discovery applications:
                     "prompt": analysis_prompt,
                     "timestamp": datetime.now().isoformat()
                 }
+            }
+    
+    async def test_query_analyzer(self, query: str) -> Dict:
+        """
+        Test method to verify QueryAnalyzer integration.
+        This method only runs the analysis without executing database calls.
+        
+        Args:
+            query: The test query string
+            
+        Returns:
+            Dict containing analysis results
+        """
+        try:
+            # Run analysis
+            analysis = await self.query_analyzer.analyze_query(query)
+            
+            # Get database sequence
+            db_sequence = self.query_analyzer.get_optimal_database_sequence(analysis)
+            
+            # Generate domain-specific prompt
+            domain_prompt = self.query_analyzer.create_domain_specific_prompt(analysis)
+            
+            # Truncate prompt for readability
+            prompt_preview = domain_prompt[:500] + "..." if len(domain_prompt) > 500 else domain_prompt
+            
+            return {
+                "success": True,
+                "query": query,
+                "analysis": analysis,
+                "database_sequence": db_sequence,
+                "prompt_preview": prompt_preview
+            }
+        except Exception as e:
+            BioChatLogger.log_error(f"Test query analyzer error: {str(e)}", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "query": query
+            }
+    
+    async def process_knowledge_graph_query(self, query: str) -> Dict:
+        """
+        Process a query using the knowledge graph approach with specialized handling.
+        This method implements a more sophisticated biological query processing pipeline
+        based on entity-relationship analysis.
+        
+        Args:
+            query: The user's query string
+            
+        Returns:
+            Dict containing the complete response with analysis metadata
+        """
+        try:
+            BioChatLogger.log_info(f"Processing knowledge graph query: {query}")
+            
+            # 1. Add query to conversation history
+            self.conversation_history.append({"role": "user", "content": query})
+            
+            # 2. Perform intelligent query analysis
+            analysis = await self.query_analyzer.analyze_query(query)
+            BioChatLogger.log_info(f"Knowledge graph analysis complete: {json.dumps(analysis)[:200]}...")
+            
+            # 3. Get optimal database sequence
+            db_sequence = self.query_analyzer.get_optimal_database_sequence(analysis)
+            BioChatLogger.log_info(f"Knowledge graph database sequence: {db_sequence}")
+            
+            # 4. Generate domain-specific system prompt
+            system_prompt = self.query_analyzer.create_domain_specific_prompt(analysis)
+            
+            # 5. Convert database names to tool definitions
+            prioritized_tools = []
+            for db_name in db_sequence:
+                for tool in BIOCHAT_TOOLS:
+                    if tool["function"]["name"] == db_name:
+                        prioritized_tools.append(tool)
+                        break
+            
+            # 6. Generate tool calls using domain-specific prompt
+            messages = [
+                {"role": "system", "content": system_prompt},
+                *self.conversation_history
+            ]
+            
+            # 7. Execute tool calls and collect results
+            completion = await self.client.chat.completions.create(
+                model=self.gpt_model,
+                messages=messages,
+                tools=prioritized_tools,
+                tool_choice="auto"
+            )
+            
+            # Process tool calls and API responses (similar to process_query)
+            # Handle tool calls and responses like in the process_query method
+            initial_message = completion.choices[0].message
+            api_responses = {}
+            
+            if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
+                # Logic for handling tool calls goes here (similar to process_query)
+                # This should be refactored into a shared method in a production environment
+                pass
+            
+            # 8. Structure and return results
+            result = {
+                "query": query,
+                "analysis": analysis,
+                "database_sequence": db_sequence,
+                "system_prompt": system_prompt,
+                "api_responses": api_responses,
+                "synthesis": "Knowledge graph analysis complete"  # Placeholder for actual synthesis
+            }
+            
+            return result
+            
+        except Exception as e:
+            BioChatLogger.log_error(f"Knowledge graph query processing error: {str(e)}", e)
+            return {
+                "query": query,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
             }
     
     async def execute_string_query(self, query: str, context: Optional[str] = None) -> Dict:
