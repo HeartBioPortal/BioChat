@@ -500,7 +500,7 @@ class ReactomeClient(BioDatabaseAPI):
     async def get_pathways_for_gene(self, gene_name: str) -> Dict:
         """
         Get pathways involving a given gene using multiple strategies.
-        First attempts UniProt mapping, then tries direct Reactome search.
+        First tries direct gene name mapping, then UniProt ID mapping, then search.
         
         Args:
             gene_name: Gene symbol (e.g., "CD47", "TP53")
@@ -511,22 +511,93 @@ class ReactomeClient(BioDatabaseAPI):
         try:
             BioChatLogger.log_info(f"Getting pathways for gene {gene_name}")
             
-            # Strategy 1: Via UniProt mapping
+            # Strategy 1: Direct gene name approach - this is most reliable!
+            try:
+                BioChatLogger.log_info(f"Getting pathways by direct gene name: {gene_name}")
+                # Try the direct gene-to-pathway endpoint
+                endpoint = f"data/mapping/UniProt/{gene_name}/pathways"
+                params = {"species": "9606"}  # Human species ID
+                pathways_response = await self._make_request(endpoint, params=params)
+                
+                # If we got results directly, format and return them
+                if pathways_response and isinstance(pathways_response, list) and len(pathways_response) > 0:
+                    BioChatLogger.log_info(f"Found {len(pathways_response)} pathways via direct gene name mapping")
+                    
+                    # Format the response consistently
+                    formatted_pathways = []
+                    for pathway in pathways_response:
+                        formatted_pathways.append({
+                            "pathway_id": pathway.get("stId", ""),
+                            "pathway_name": pathway.get("displayName", ""),
+                            "species": pathway.get("speciesName", "Homo sapiens"),
+                            "source": "Reactome Direct Gene Mapping",
+                            "is_disease": pathway.get("isInDisease", False),
+                            "has_diagram": pathway.get("hasDiagram", False)
+                        })
+                    
+                    return {"pathways": formatted_pathways, "count": len(formatted_pathways), "method": "direct_gene_mapping"}
+            except Exception as e:
+                BioChatLogger.log_error(f"Error in direct gene mapping for {gene_name}", e)
+                # Try alternative approach with direct HTTP request
+                try:
+                    BioChatLogger.log_info(f"Trying direct HTTP request for gene {gene_name}")
+                    url = f"https://reactome.org/ContentService/data/mapping/UniProt/{gene_name}/pathways?species=9606"
+                    session = requests.Session()
+                    response = session.get(url)
+                    response.raise_for_status()
+                    pathways_data = response.json()
+                    
+                    if pathways_data and isinstance(pathways_data, list) and len(pathways_data) > 0:
+                        BioChatLogger.log_info(f"Found {len(pathways_data)} pathways via direct HTTP request")
+                        
+                        # Format the response consistently
+                        formatted_pathways = []
+                        for pathway in pathways_data:
+                            formatted_pathways.append({
+                                "pathway_id": pathway.get("stId", ""),
+                                "pathway_name": pathway.get("displayName", ""),
+                                "species": pathway.get("speciesName", "Homo sapiens"),
+                                "source": "Reactome Direct HTTP Request",
+                                "is_disease": pathway.get("isInDisease", False),
+                                "has_diagram": pathway.get("hasDiagram", False)
+                            })
+                        
+                        return {"pathways": formatted_pathways, "count": len(formatted_pathways), "method": "direct_http_request"}
+                except Exception as http_error:
+                    BioChatLogger.log_error(f"Error in direct HTTP request for {gene_name}", http_error)
+            
+            # Strategy 2: Via UniProt mapping
             try:
                 BioChatLogger.log_info(f"Getting UniProt ID for gene {gene_name}")
                 uniprot_id = self.get_primary_uniprot_id(gene_name.strip())
                 if uniprot_id:
                     BioChatLogger.log_info(f"Found UniProt ID: {uniprot_id} for {gene_name}")
                     
-                    # Try to get interactors directly which has better reliability
-                    pathways = await self.get_interactors_for_gene(uniprot_id)
-                    if pathways and len(pathways) > 0:
-                        BioChatLogger.log_info(f"Found {len(pathways)} pathways via interactors")
-                        return {"pathways": pathways, "count": len(pathways), "method": "interactors"}
+                    # Try the direct mapping endpoint with UniProt ID
+                    endpoint = f"data/mapping/UniProt/{uniprot_id}/pathways"
+                    params = {"species": "9606"}  # Human species ID
+                    pathways_response = await self._make_request(endpoint, params=params)
+                    
+                    if pathways_response and isinstance(pathways_response, list) and len(pathways_response) > 0:
+                        BioChatLogger.log_info(f"Found {len(pathways_response)} pathways via UniProt ID mapping")
+                        
+                        # Format the response consistently
+                        formatted_pathways = []
+                        for pathway in pathways_response:
+                            formatted_pathways.append({
+                                "pathway_id": pathway.get("stId", ""),
+                                "pathway_name": pathway.get("displayName", ""),
+                                "species": pathway.get("speciesName", "Homo sapiens"),
+                                "source": "Reactome UniProt ID Mapping",
+                                "is_disease": pathway.get("isInDisease", False),
+                                "has_diagram": pathway.get("hasDiagram", False)
+                            })
+                        
+                        return {"pathways": formatted_pathways, "count": len(formatted_pathways), "method": "uniprot_id_mapping"}
             except Exception as e:
-                BioChatLogger.log_error(f"Error in UniProt mapping for {gene_name}", e)
+                BioChatLogger.log_error(f"Error in UniProt ID mapping for {gene_name}", e)
             
-            # Strategy 2: Direct Reactome search by gene name
+            # Strategy 3: Direct Reactome search by gene name
             try:
                 BioChatLogger.log_info(f"Directly searching Reactome for gene {gene_name}")
                 pathways = await self.search_pathways_by_gene(gene_name)
@@ -536,7 +607,7 @@ class ReactomeClient(BioDatabaseAPI):
             except Exception as e:
                 BioChatLogger.log_error(f"Error in direct Reactome search for {gene_name}", e)
             
-            # Strategy 3: Use standard pathways for common genes
+            # Strategy 4: Use standard pathways for common genes
             if gene_name.upper() in self.get_common_pathways():
                 BioChatLogger.log_info(f"Using standard pathways for {gene_name}")
                 pathways = self.get_common_pathways()[gene_name.upper()]
