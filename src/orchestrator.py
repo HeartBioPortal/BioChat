@@ -804,9 +804,31 @@ For drug discovery applications:
                             "tool_call_id": tool_call.id
                         })
             
-            # Generate final synthesis with all data
+            # Generate final synthesis with all data, including enhanced system prompt for citations
+            citation_prompt = """
+            When synthesizing information from multiple databases, please:
+            
+            1. Cite the specific database source for each key piece of information inline using [SOURCE] format
+               Example: CD47 is involved in phagocytosis inhibition [UniProt] and has been linked to platelet activation [Literature]
+               
+            2. For literature citations, include PMID when available
+               Example: A recent study found that CD47 is upregulated in atherosclerotic plaques [PMID:12345678]
+               
+            3. Include a "References" section at the end summarizing all data sources used
+               Example:
+               ### References
+               - UniProt: Protein information for CD47
+               - Literature: 3 papers on CD47 and cardiovascular disease (PMIDs: 12345678, 23456789, 34567890)
+               - STRING: Protein interaction network for CD47
+               
+            4. Handle contradictory information by noting the source of each claim
+               Example: While some studies suggest a protective role [PMID:12345678], others indicate CD47 may exacerbate inflammation [PMID:23456789]
+            """
+            
+            enhanced_system_prompt = system_prompt + "\n\n" + citation_prompt
+            
             final_messages = [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": enhanced_system_prompt},
                 *self.conversation_history
             ]
             
