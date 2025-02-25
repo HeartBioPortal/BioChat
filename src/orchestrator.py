@@ -754,25 +754,90 @@ For drug discovery applications:
                 tool_choice="auto"
             )
             
-            # Process tool calls and API responses (similar to process_query)
-            # Handle tool calls and responses like in the process_query method
+            # Process tool calls and API responses
             initial_message = completion.choices[0].message
             api_responses = {}
             
             if hasattr(initial_message, 'tool_calls') and initial_message.tool_calls:
-                # Logic for handling tool calls goes here (similar to process_query)
-                # This should be refactored into a shared method in a production environment
-                pass
+                # Add assistant message with all tool calls
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": initial_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tool_call.id,
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments
+                            },
+                            "type": "function"
+                        }
+                        for tool_call in initial_message.tool_calls
+                    ]
+                })
+
+                # Process all tool calls
+                for tool_call in initial_message.tool_calls:
+                    try:
+                        # Execute tool call
+                        function_response = await self.tool_executor.execute_tool(tool_call)
+                        
+                        # Store response and add to conversation history
+                        summarized_response = self.summarize_api_response(tool_call.function.name, function_response)
+                        
+                        # Add to API responses if contains actual data
+                        if summarized_response:
+                            api_responses[tool_call.function.name] = summarized_response
+                        
+                        # Add tool response to conversation history
+                        self.conversation_history.append({
+                            "role": "tool",
+                            "content": summarized_response if summarized_response else "No data found",
+                            "tool_call_id": tool_call.id
+                        })
+                        
+                    except Exception as e:
+                        BioChatLogger.log_error(f"API call failed for {tool_call.function.name}", e)
+                        self.conversation_history.append({
+                            "role": "tool",
+                            "content": json.dumps({"error": str(e)}),
+                            "tool_call_id": tool_call.id
+                        })
             
-            # 8. Structure and return results
+            # Generate final synthesis with all data
+            final_messages = [
+                {"role": "system", "content": system_prompt},
+                *self.conversation_history
+            ]
+            
+            final_completion = await self.client.chat.completions.create(
+                model=self.gpt_model,
+                messages=final_messages
+            )
+            
+            synthesis = final_completion.choices[0].message.content
+            self.conversation_history.append({"role": "assistant", "content": synthesis})
+            
+            # Save results to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"kg_response_{timestamp}.json"
+            filepath = os.path.join(API_RESULTS_DIR, filename)
+            
+            # Prepare results
             result = {
                 "query": query,
                 "analysis": analysis,
                 "database_sequence": db_sequence,
-                "system_prompt": system_prompt,
                 "api_responses": api_responses,
-                "synthesis": "Knowledge graph analysis complete"  # Placeholder for actual synthesis
+                "synthesis": synthesis,
+                "timestamp": timestamp
             }
+            
+            # Save to file
+            with open(filepath, "w") as file:
+                json.dump(result, file, indent=4)
+            
+            BioChatLogger.log_info(f"Knowledge graph response saved at {filepath}")
             
             return result
             
