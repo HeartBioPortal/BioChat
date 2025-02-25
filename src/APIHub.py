@@ -562,14 +562,30 @@ class ReactomeClient(BioDatabaseAPI):
             Dict containing pathway details and participants
         """
         try:
-            # Get basic pathway information
-            endpoint = f"data/pathway/{pathway_id}/containedEvents"
+            # Get basic pathway information instead of containedEvents which often fails
+            endpoint = f"data/pathway/{pathway_id}"
             details = await self._make_request(endpoint)
-            return details
+            
+            if not details or "stId" not in details:
+                BioChatLogger.log_error(f"No pathway details found for {pathway_id}")
+                return {}
+                
+            # Format the response more consistently
+            formatted_details = {
+                "pathway_id": details.get("stId"),
+                "pathway_name": details.get("displayName"),
+                "species": details.get("speciesName", "Homo sapiens"),
+                "compartment": details.get("compartment", {}).get("name", "Unknown"),
+                "is_disease": details.get("isInDisease", False),
+                "has_diagram": details.get("hasDiagram", False),
+                "source": "Reactome Pathway API"
+            }
+            
+            return formatted_details
             
         except Exception as e:
             BioChatLogger.log_error(f"Error getting pathway details for {pathway_id}", e)
-            return {"error": str(e)}
+            return {}
 
     def get_primary_uniprot_id(self, gene_name: str) -> Optional[str]:
         """
@@ -674,7 +690,26 @@ class ReactomeClient(BioDatabaseAPI):
                 "clustered": "true"
             }
             endpoint = "search/query"
-            response = await self._make_request(endpoint, params=params)
+            
+            try:
+                response = await self._make_request(endpoint, params=params)
+                BioChatLogger.log_info(f"Reactome search response: {str(response)[:200]}...")
+            except Exception as search_error:
+                BioChatLogger.log_error(f"Error with Reactome search API: {str(search_error)}")
+                
+                # Try alternate search endpoint as fallback
+                BioChatLogger.log_info(f"Trying alternate search endpoint for {gene_name}")
+                # Use a more direct search approach with the main Reactome website
+                url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens&types=Pathway&cluster=true"
+                try:
+                    session = requests.Session()
+                    alt_response = session.get(url)
+                    alt_response.raise_for_status()
+                    response = alt_response.json()
+                    BioChatLogger.log_info(f"Alternate search succeeded, found {len(response.get('results', []))} results")
+                except Exception as alt_error:
+                    BioChatLogger.log_error(f"Alternate search also failed: {str(alt_error)}")
+                    return []
             
             # If no results, return empty list
             if not response or "results" not in response:
@@ -684,14 +719,17 @@ class ReactomeClient(BioDatabaseAPI):
             # Format the results in a consistent way
             pathways = []
             for result in response.get("results", []):
-                if result.get("exactType") == "Pathway":
+                # Include both Pathway and Reaction types
+                if result.get("exactType") in ["Pathway", "Reaction"]:
                     pathways.append({
                         "pathway_id": result.get("stId", ""),
                         "pathway_name": result.get("name", ""),
                         "species": "Homo sapiens",
-                        "source": "Reactome Search API"
+                        "source": "Reactome Search API",
+                        "type": result.get("exactType", "Unknown")
                     })
                     
+            BioChatLogger.log_info(f"Found {len(pathways)} pathways via search for {gene_name}")
             return pathways
             
         except Exception as e:
