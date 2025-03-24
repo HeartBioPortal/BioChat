@@ -1,0 +1,50 @@
+name: BioChat Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, '3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Test with pytest (unit tests only)
+      run: |
+        pytest -m "unit" --cov=biochat
+      env:
+        # Unit tests should run without external API keys
+        SKIP_API_TESTS: "true"
+    - name: Integration tests
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      run: |
+        pytest -m "integration" --cov=biochat --cov-append
+      env:
+        # These values would be set as GitHub secrets
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
+        BIOGRID_ACCESS_KEY: ${{ secrets.BIOGRID_ACCESS_KEY }}
+    - name: Upload coverage report
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      uses: codecov/codecov-action@v3

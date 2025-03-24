@@ -1,255 +1,210 @@
 # BioChat
 
-BioChat is an intelligent conversational interface for biological databases that combines the power of large language models with specialized biological data sources. It enables researchers and professionals to interact with multiple biological databases using natural language queries.
+BioChat is a specialized API for interacting with biological databases through natural language. It allows researchers to query multiple biological databases simultaneously using conversational language and synthesizes the results into comprehensive, research-grade responses.
 
+## Features
 
-## Supported Databases and APIs
-
-BioChat integrates with multiple biological databases to provide comprehensive analysis capabilities:
-
-## Process FlowChart
-
-![image (4)](https://github.com/user-attachments/assets/0e8681a7-df04-44e0-8ede-fd6354eb080d)
-
-
-### Core Databases
-- **NCBI PubMed (E-utilities)**
-  - Literature search and analysis
-  - Citation information
-  - Article abstracts
-
-- **Open Targets Platform**
-  - Target-disease associations
-  - Drug information
-  - Clinical trials data
-  - Safety information
-  - Expression data
-
-- **Reactome**
-  - Biological pathways
-  - Molecular mechanisms
-  - Disease pathways
-
-- **Ensembl**
-  - Genetic variants
-  - Genomic annotations
-  - Gene information
-
-### Molecular Interactions and Networks
-- **STRING-DB**
-  - Protein-protein interactions
-  - Interaction networks
-  - Functional associations
-
-- **IntAct**
-  - Molecular interaction data
-  - Experimentally verified interactions
-  - Interaction networks
-
-- **BioGRID**
-  - Protein-protein interactions
-  - Genetic interactions
-  - Chemical associations
-
-### Disease and Drug Resources
-- **GWAS Catalog**
-  - Genetic associations
-  - Trait information
-  - Study metadata
-
-- **PharmGKB**
-  - Drug-gene relationships
-  - Clinical annotations
-  - Pharmacogenomic data
-
-### Protein and Pathway Information
-- **UniProt**
-  - Protein sequences
-  - Protein structure
-  - Function annotations
-
-- **BioCyc**
-  - Metabolic pathways
-  - Biochemical reactions
-  - Regulatory networks
-
-### Integration Features
-Each database provides specific capabilities:
-- Literature mining and evidence synthesis (PubMed)
-- Drug-target interactions and clinical relevance (Open Targets, PharmGKB)
-- Molecular interaction networks (STRING-DB, IntAct, BioGRID)
-- Pathway analysis and mechanisms (Reactome, BioCyc)
-- Genetic variation and genomic features (Ensembl)
-- Disease associations and pharmacogenomics (GWAS Catalog, PharmGKB)
-- Protein information and annotations (UniProt)
-
-
-
-## Project Structure
-
-```
-biochat/
-
-├── LICENSE
-├── README.md
-├── commitss.sh
-├── config.py
-├── htmlcov
-│   ├── status.json
-│   └── style_cb_8e611ae1.css
-├── requirements.txt
-├── run_tests.sh
-├── setup.py
-├── src
-│   ├── APIHub.py
-│   ├── __init__.py
-│   ├── __pycache__
-│   ├── api.py
-│   ├── orchestrator.py
-│   ├── schemas.py
-│   └── tool_executor.py
-└── tests
-    ├── __init__.py
-    ├── __pycache__
-    ├── conftest.py
-    ├── integration
-    │   ├── __init__.py
-    │   ├── __pycache__
-    │   ├── conftest.py
-    │   ├── test_gwas.py
-    │   ├── test_literature.py
-    │   ├── test_protein.py
-    │   └── test_variants.py
-    ├── logs
-    ├── pytest.ini
-    ├── test_api.py
-    ├── test_logger.py
-    ├── test_orchestrator.py
-    ├── test_requirements.txt
-    ├── test_tool_executor.py
-    └── utils
-        ├── __init__.py
-        ├── __pycache__
-        └── logger.py
-```
-
-## Prerequisites
-
-- Python 3.9 or higher
-- OpenAI API key
-- NCBI API key
-- Valid email address for API access
+- **Natural Language Processing**: Query complex biological databases using plain English
+- **Multi-Database Integration**: Automatically routes queries to the most appropriate biological databases
+- **Intelligent Query Analysis**: Uses a knowledge graph approach to understand entity relationships
+- **Comprehensive Response Synthesis**: Combines data from multiple sources with proper citations
+- **API Connectivity**: Integrates with numerous biological databases:
+  - NCBI PubMed (literature)
+  - UniProt (protein information)
+  - Reactome (pathways)
+  - STRING-DB (protein interactions)
+  - BioGRID (molecular interactions)
+  - ChEMBL (chemical compounds)
+  - Open Targets (drug targets)
+  - IntAct (molecular interactions)
+  - PharmGKB (pharmacogenomics)
+  - Ensembl (genetic variants)
+  - GWAS Catalog (genetic associations)
 
 ## Installation
 
-1. Clone the repository:
+### Prerequisites
+
+- Python 3.8 or higher
+- API keys for the following services:
+  - OpenAI (for GPT-4)
+  - NCBI E-utilities
+  - BioGRID (optional)
+
+### Install from PyPI
+
+```bash
+pip install biochat
+```
+
+### Install from Source
+
 ```bash
 git clone https://github.com/yourusername/biochat.git
 cd biochat
+pip install -e .
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
+### Set up Environment Variables
+
+Create a `.env` file in your project root:
+
 ```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Configuration
-
-Create a `.env` file in the project root with the following variables:
-
-```env
 OPENAI_API_KEY=your_openai_api_key
 NCBI_API_KEY=your_ncbi_api_key
 CONTACT_EMAIL=your_email@example.com
-PORT=8000
-HOST=0.0.0.0
+BIOGRID_ACCESS_KEY=your_biogrid_api_key  # Optional
 ```
 
-## Running the Application
-
-Start the FastAPI server from the project root:
-
-```bash
-python -m src.api
-```
-
-The API will be available at `http://localhost:8000`. Access the interactive API documentation at `http://localhost:8000/docs`.
-
-## API Endpoints
-
-The following endpoints are available:
-
-- `POST /query`: Process a natural language query about biological topics
-- `GET /history`: Retrieve the conversation history
-- `POST /clear`: Clear the conversation history
-- `GET /health`: Check the API's health status
-
-## Example Usage
-
-Here's an example of how to use the API:
+## Quick Start
 
 ```python
-import requests
+import asyncio
+import os
+from dotenv import load_dotenv
+from biochat import BioChatOrchestrator
 
-# Send a query
-response = requests.post(
-    "http://localhost:8000/query",
-    json={"text": "What are the known genetic variants associated with cystic fibrosis?"}
-)
+# Load environment variables
+load_dotenv()
 
-print(response.json())
+async def main():
+    # Initialize the orchestrator
+    orchestrator = BioChatOrchestrator(
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        ncbi_api_key=os.getenv("NCBI_API_KEY"),
+        biogrid_access_key=os.getenv("BIOGRID_ACCESS_KEY"),
+        tool_name="YourAppName",
+        email=os.getenv("CONTACT_EMAIL")
+    )
+    
+    # Process a query
+    response = await orchestrator.process_query(
+        "What is the role of TP53 in cancer development?"
+    )
+    
+    print(response)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-## Development Guidelines
+## Advanced Usage
 
-When developing new features:
+### Knowledge Graph Queries
 
-1. Place all source code in the `src` directory
-2. Add test files in the `tests` directory
-3. Follow the package structure for imports:
-   ```python
-   from src.schemas import LiteratureSearchParams
-   from src.tool_executor import ToolExecutor
-   ```
-4. Update requirements.txt when adding new dependencies
-5. Maintain consistent error handling and logging practices
-6. Follow the established code style and documentation standards
+For more sophisticated queries that benefit from knowledge graph analysis:
 
-## Error Handling
+```python
+# Using knowledge graph approach for complex queries
+result = await orchestrator.process_knowledge_graph_query(
+    "How does CD47 regulate macrophage phagocytosis in cancer?"
+)
 
-The API implements comprehensive error handling:
+print(result["synthesis"])  # Print the synthesized response
+```
 
-- Input validation errors return 422 status code
-- Authentication errors return 401 status code
-- Server errors return 500 status code
-- All errors include detailed error messages and timestamps
+### Customizing Database Selection
+
+```python
+from biochat.utils.query_analyzer import QueryAnalyzer
+
+# Create a custom query analyzer
+analyzer = QueryAnalyzer(openai_client)
+
+# Analyze a query to determine optimal database sequence
+analysis = await analyzer.analyze_query("What proteins interact with BRCA1?")
+db_sequence = analyzer.get_optimal_database_sequence(analysis)
+
+print(f"Optimal database sequence: {db_sequence}")
+```
+
+## Integration with Web Frameworks
+
+### FastAPI Integration
+
+```python
+from fastapi import FastAPI, Depends
+from pydantic import BaseModel
+from typing import Dict
+
+app = FastAPI()
+
+class Query(BaseModel):
+    text: str
+
+def get_orchestrator():
+    return BioChatOrchestrator(
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        ncbi_api_key=os.getenv("NCBI_API_KEY"),
+        biogrid_access_key=os.getenv("BIOGRID_ACCESS_KEY"),
+        tool_name="BioChatAPI",
+        email=os.getenv("CONTACT_EMAIL")
+    )
+
+@app.post("/query")
+async def process_query(query: Query, orchestrator=Depends(get_orchestrator)):
+    response = await orchestrator.process_query(query.text)
+    return {"response": response}
+```
+
+### Django Integration
+
+See the `examples/django_app` directory for a complete Django integration example.
+
+## Architecture
+
+BioChat consists of several key components:
+
+1. **Orchestrator**: Manages query processing and database selection
+2. **Query Analyzer**: Analyzes queries using knowledge graph principles
+3. **Tool Executor**: Handles API calls to biological databases
+4. **API Hub**: Contains client classes for various biological database APIs
+5. **Response Summarizer**: Filters and condenses API responses
+6. **Schema Definitions**: Pydantic models for request/response validation
+
+## API References
+
+For detailed information about the APIs used in BioChat, see:
+
+- [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25500/)
+- [Reactome Content Service](https://reactome.org/ContentService/)
+- [IntAct Web Service](https://www.ebi.ac.uk/intact/ws/interaction/v2/api-docs)
+- [BioGRID REST API](https://wiki.thebiogrid.org/doku.php/biogridrest)
+- [UniProt API](https://www.uniprot.org/help/api)
+- [ChEMBL API](https://chembl.gitbook.io/chembl-interface-documentation/web-services/chembl-data-web-services)
+- [Open Targets Platform API](https://platform-docs.opentargets.org/api-documentation)
+- [Ensembl REST API](https://rest.ensembl.org/)
 
 ## Testing
 
-To run the test suite:
+Run tests using the provided script:
 
 ```bash
-pytest tests/
+# Run all tests
+python run_tests.py
+
+# Run only unit tests
+python run_tests.py --unit
+
+# Run only integration tests
+python run_tests.py --integration
+
+# Generate coverage report
+python run_tests.py --coverage
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
 
 ## License
 
-This project is licensed under the GNU AFFERO License - see the LICENSE file for details.
+[MIT License](LICENSE)
 
-## Support
+## Citation
 
-For support, please open an issue in the GitHub repository or contact the maintainers.
+If you use BioChat in your research, please cite:
+
+```
+Your Name et al. (2025). BioChat: A Natural Language Interface for Biological Databases. 
+```
+
+## Acknowledgments
+
+BioChat leverages several open-source biological databases and APIs. We gratefully acknowledge the providers of these resources for making their data accessible.

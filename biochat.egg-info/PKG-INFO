@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: biochat
+Version: 0.1.0
+Summary: BioChat API for interacting with biological databases through natural language
+Author: Your Name
+Author-email: your.email@example.com
+Keywords: biology,api,chat,bioinformatics
+Requires-Python: >=3.8
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: python-dotenv
+Requires-Dist: aiohttp
+Requires-Dist: openai
+Requires-Dist: pydantic
+Requires-Dist: tenacity
+Requires-Dist: requests
+Dynamic: author
+Dynamic: author-email
+Dynamic: keywords
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

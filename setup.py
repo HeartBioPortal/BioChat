@@ -7,9 +7,16 @@ setup(
     install_requires=[
         "fastapi",
         "uvicorn",
-        "openai",
         "python-dotenv",
-        "requests",
+        "aiohttp",
+        "openai",
         "pydantic",
+        "tenacity",
+        "requests",
     ],
+    author="Your Name",
+    author_email="your.email@example.com",
+    description="BioChat API for interacting with biological databases through natural language",
+    keywords="biology, api, chat, bioinformatics",
+    python_requires=">=3.8",
 )
